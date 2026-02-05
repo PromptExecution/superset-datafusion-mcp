@@ -24,9 +24,9 @@ requiring database storage.
 """
 
 from superset.mcp_service.dataframe.registry import (
+    get_registry,
     VirtualDataset,
     VirtualDatasetRegistry,
-    get_registry,
 )
 from superset.mcp_service.dataframe.schemas import (
     ColumnSchema,

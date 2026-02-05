@@ -25,9 +25,9 @@ import pyarrow as pa
 import pytest
 
 from superset.mcp_service.dataframe.registry import (
+    reset_registry,
     VirtualDataset,
     VirtualDatasetRegistry,
-    reset_registry,
 )
 
 
@@ -277,7 +277,10 @@ def test_virtual_dataset_get_column_info(sample_table: pa.Table) -> None:
     assert id_col["is_dttm"] is False
 
     name_col = next(c for c in columns if c["column_name"] == "name")
-    assert "string" in name_col["type"].lower() or "utf8" in name_col["type"].lower()
+    col_type = name_col["type"]
+    # col_type could be str or bool, but should be str for type info
+    assert isinstance(col_type, str)
+    assert "string" in col_type.lower() or "utf8" in col_type.lower()
 
 
 def test_registry_total_size_and_count(

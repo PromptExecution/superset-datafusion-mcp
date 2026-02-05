@@ -66,7 +66,10 @@ async def remove_virtual_dataset(
         if dataset is None:
             return RemoveVirtualDatasetResponse(
                 success=False,
-                message=f"Virtual dataset '{request.dataset_id}' not found or already expired",
+                message=(
+                    f"Virtual dataset '{request.dataset_id}' "
+                    "not found or already expired"
+                ),
             )
 
         # Remove the dataset
@@ -76,7 +79,9 @@ async def remove_virtual_dataset(
             await ctx.info("Virtual dataset removed successfully")
             return RemoveVirtualDatasetResponse(
                 success=True,
-                message=f"Virtual dataset '{request.dataset_id}' removed successfully",
+                message=(
+                    f"Virtual dataset '{request.dataset_id}' removed successfully"
+                ),
             )
         else:
             return RemoveVirtualDatasetResponse(

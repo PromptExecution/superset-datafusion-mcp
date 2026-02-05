@@ -54,9 +54,7 @@ class ColumnSchema(BaseModel):
         default=False,
         description="Whether this column can be used as a metric (for aggregations)",
     )
-    label: str | None = Field(
-        default=None, description="Display label for the column"
-    )
+    label: str | None = Field(default=None, description="Display label for the column")
 
 
 class IngestDataFrameRequest(BaseModel):
@@ -152,9 +150,7 @@ class ListVirtualDatasetsResponse(BaseModel):
         description="List of virtual datasets in the current session"
     )
     total_count: int = Field(description="Total number of datasets")
-    total_size_mb: float = Field(
-        description="Total size of all datasets in megabytes"
-    )
+    total_size_mb: float = Field(description="Total size of all datasets in megabytes")
 
 
 class RemoveVirtualDatasetRequest(BaseModel):
@@ -203,9 +199,7 @@ class QueryVirtualDatasetResponse(BaseModel):
     columns: list[dict[str, str]] | None = Field(
         default=None, description="Column metadata for results"
     )
-    row_count: int | None = Field(
-        default=None, description="Number of rows returned"
-    )
+    row_count: int | None = Field(default=None, description="Number of rows returned")
     error: str | None = Field(default=None, description="Error message if failed")
 
 
@@ -248,9 +242,7 @@ class ChartRecommendation(BaseModel):
     y_columns: list[str] = Field(
         default_factory=list, description="Suggested Y-axis columns"
     )
-    group_by: str | None = Field(
-        default=None, description="Suggested grouping column"
-    )
+    group_by: str | None = Field(default=None, description="Suggested grouping column")
     reasoning: str = Field(description="Why this chart type is recommended")
     confidence: float = Field(
         ge=0.0, le=1.0, description="Confidence score for this recommendation"

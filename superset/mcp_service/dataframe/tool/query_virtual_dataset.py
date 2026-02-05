@@ -138,18 +138,12 @@ async def query_virtual_dataset(
         df = result_table.to_pandas()
         rows = []
         for _, row in df.iterrows():
-            rows.append(
-                {col: _convert_value(row[col]) for col in df.columns}
-            )
+            rows.append({col: _convert_value(row[col]) for col in df.columns})
 
-        columns = [
-            {"name": col, "type": str(df[col].dtype)}
-            for col in df.columns
-        ]
+        columns = [{"name": col, "type": str(df[col].dtype)} for col in df.columns]
 
         await ctx.info(
-            "Query completed: rows=%d, columns=%d"
-            % (len(rows), len(columns))
+            "Query completed: rows=%d, columns=%d" % (len(rows), len(columns))
         )
 
         return QueryVirtualDatasetResponse(

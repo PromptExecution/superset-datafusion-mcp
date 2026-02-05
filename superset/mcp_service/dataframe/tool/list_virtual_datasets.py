@@ -24,6 +24,7 @@ Lists all virtual datasets available in the current session.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from fastmcp import Context
 from superset_core.mcp import tool
@@ -63,19 +64,45 @@ async def list_virtual_datasets(ctx: Context) -> ListVirtualDatasetsResponse:
         datasets = []
         for ds in datasets_raw:
             # Get full dataset for column info
-            full_dataset = registry.get(ds["id"])
+            ds_id = ds["id"]
+            if not isinstance(ds_id, str):
+                continue  # Skip invalid entries
+
+            full_dataset = registry.get(ds_id)
             columns = full_dataset.get_column_info() if full_dataset else []
+
+            # Safe type assertions with defaults
+            name = ds.get("name", "")
+            row_count = ds.get("row_count", 0)
+            column_count = ds.get("column_count", 0)
+            size_bytes = ds.get("size_bytes", 0)
+            created_at = ds.get("created_at")
+            expires_at = ds.get("expires_at")
+
+            # Ensure proper types
+            if not isinstance(name, str):
+                name = str(name) if name else ""
+            if not isinstance(row_count, int):
+                row_count = int(str(row_count)) if row_count else 0
+            if not isinstance(column_count, int):
+                column_count = int(str(column_count)) if column_count else 0
+            if not isinstance(size_bytes, int):
+                size_bytes = int(str(size_bytes)) if size_bytes else 0
+            if not isinstance(created_at, datetime):
+                created_at = datetime.now(timezone.utc)
+
+            size_mb = round(size_bytes / 1024 / 1024, 2)
 
             datasets.append(
                 VirtualDatasetInfo(
-                    id=ds["id"],
-                    name=ds["name"],
-                    row_count=ds["row_count"],
-                    column_count=ds["column_count"],
-                    size_bytes=ds["size_bytes"],
-                    size_mb=round(ds["size_bytes"] / 1024 / 1024, 2),
-                    created_at=ds["created_at"],
-                    expires_at=ds["expires_at"],
+                    id=ds_id,
+                    name=name,
+                    row_count=row_count,
+                    column_count=column_count,
+                    size_bytes=size_bytes,
+                    size_mb=size_mb,
+                    created_at=created_at,
+                    expires_at=expires_at if isinstance(expires_at, datetime) else None,
                     columns=columns,
                 )
             )

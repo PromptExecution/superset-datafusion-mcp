@@ -140,7 +140,7 @@ The `QueryContextProcessor` manages DataFrame handling for chart rendering:
 # superset/common/query_context_processor.py
 class QueryContextProcessor:
     cache_type: ClassVar[str] = "df"  # Caches pandas DataFrames
-    
+
     def get_df_payload(self, query_obj: QueryObject) -> dict[str, Any]:
         # Returns cached or fresh DataFrame results
 ```
@@ -184,7 +184,7 @@ The `Explorable` protocol (data source interface) assumes SQL-based querying:
 class Explorable(Protocol):
     def get_query_result(self, query_object: QueryObject) -> QueryResult:
         """Execute a query and return results."""
-    
+
     def get_query_str(self, query_obj: QueryObjectDict) -> str:
         """Get the query string without executing."""
 ```
@@ -333,16 +333,16 @@ class VirtualDataset:
 
 class VirtualDatasetRegistry:
     """In-memory registry for virtual datasets."""
-    
+
     def register(self, name: str, table: pa.Table, ttl: timedelta) -> str:
         """Register a DataFrame as a virtual dataset."""
-        
+
     def get(self, dataset_id: str) -> VirtualDataset | None:
         """Retrieve a virtual dataset."""
-        
+
     def query(self, dataset_id: str, query_obj: QueryObject) -> pa.Table:
         """Execute a query against a virtual dataset using DuckDB."""
-        
+
     def cleanup_expired(self) -> int:
         """Remove expired datasets."""
 ```
@@ -384,36 +384,36 @@ class IngestDataFrameRequest(BaseModel):
 
 @tool(tags=["dataframe", "mutate"])
 async def ingest_dataframe(
-    request: IngestDataFrameRequest, 
+    request: IngestDataFrameRequest,
     ctx: Context
 ) -> IngestDataFrameResponse:
     """
     Ingest a DataFrame from Arrow IPC format for visualization.
-    
+
     This tool allows AI agents to upload DataFrame data directly
     without requiring database storage. The data is registered as
     a virtual dataset that can be used with generate_chart.
-    
+
     Example usage:
     ```python
     import pyarrow as pa
     import base64
-    
+
     # Create Arrow table
     table = pa.table({'x': [1, 2, 3], 'y': [4, 5, 6]})
-    
+
     # Serialize to IPC
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, table.schema) as writer:
         writer.write_table(table)
     data = base64.b64encode(sink.getvalue().to_pybytes()).decode()
-    
+
     # Ingest via MCP
     result = await ingest_dataframe(IngestDataFrameRequest(
         name="my_analysis",
         data=data
     ))
-    
+
     # Use virtual_dataset_id with generate_chart
     chart = await generate_chart(GenerateChartRequest(
         dataset_id=f"virtual:{result.dataset_id}",
@@ -434,13 +434,13 @@ import duckdb
 
 class VirtualDataFrameExplorable:
     """Explorable implementation for in-memory DataFrames."""
-    
+
     def __init__(self, virtual_dataset: VirtualDataset):
         self._dataset = virtual_dataset
         self._duckdb = duckdb.connect()
         # Register Arrow table with DuckDB for SQL queries
         self._duckdb.register("data", virtual_dataset.table)
-    
+
     def get_query_result(self, query_obj: QueryObject) -> QueryResult:
         """Execute query using DuckDB against Arrow table."""
         # Translate QueryObject to SQL
@@ -448,7 +448,7 @@ class VirtualDataFrameExplorable:
         # Execute against DuckDB
         result = self._duckdb.execute(sql).arrow()
         return QueryResult(df=result.to_pandas(), ...)
-    
+
     @property
     def columns(self) -> list[Any]:
         """Return column metadata from Arrow schema."""
@@ -471,21 +471,21 @@ class VirtualDataFrameExplorable:
 
 async def generate_chart(request: GenerateChartRequest, ctx: Context):
     """Extended to support virtual datasets."""
-    
+
     dataset_id = request.dataset_id
-    
+
     # Check if this is a virtual dataset reference
     if isinstance(dataset_id, str) and dataset_id.startswith("virtual:"):
         virtual_id = dataset_id[8:]  # Remove "virtual:" prefix
-        
+
         # Get virtual dataset from registry
         from superset.mcp_service.dataframe.registry import get_registry
         registry = get_registry()
         virtual_dataset = registry.get(virtual_id)
-        
+
         if not virtual_dataset:
             return error_response("Virtual dataset not found or expired")
-        
+
         # Create chart with virtual explorable
         explorable = VirtualDataFrameExplorable(virtual_dataset)
         # ... continue with chart generation using explorable
@@ -519,15 +519,15 @@ async def create_dashboard_from_dataframe(
 ) -> CreateDashboardFromDataFrameResponse:
     """
     Create a complete dashboard directly from DataFrame data.
-    
+
     This is a high-level tool that combines:
     1. DataFrame ingestion
     2. Chart generation
     3. Dashboard assembly
-    
+
     Into a single operation for maximum efficiency.
-    
-    When auto_suggest=True, the tool analyzes the data and 
+
+    When auto_suggest=True, the tool analyzes the data and
     suggests appropriate visualizations based on:
     - Column types (temporal, categorical, numeric)
     - Data cardinality
@@ -555,7 +555,7 @@ def query_arrow_table(table: pa.Table, sql: str) -> pa.Table:
     """Execute SQL against Arrow table using DuckDB."""
     conn = duckdb.connect()
     conn.register("df", table)
-    
+
     # DuckDB returns Arrow directly
     result = conn.execute(sql).arrow()
     return result

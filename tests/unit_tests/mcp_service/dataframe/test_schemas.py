@@ -82,6 +82,7 @@ def test_ingest_dataframe_request_full() -> None:
         description="Monthly sales data",
     )
     assert request.name == "sales_data"
+    assert request.column_schema is not None
     assert len(request.column_schema) == 2
     assert request.ttl_minutes == 120
     assert request.description == "Monthly sales data"

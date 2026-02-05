@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 import pyarrow as pa
 
 if TYPE_CHECKING:
-    from superset.common.query_object import QueryObject
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +273,7 @@ class VirtualDatasetRegistry:
         self.cleanup_expired()
 
         with self._lock:
-            datasets = []
+            datasets: list[dict[str, str | int | datetime | None]] = []
             for dataset in self._datasets.values():
                 if session_id is None or dataset.owner_session == session_id:
                     datasets.append(

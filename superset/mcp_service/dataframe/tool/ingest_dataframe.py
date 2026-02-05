@@ -136,7 +136,9 @@ async def ingest_dataframe(
         session_id = getattr(ctx, "session_id", None) or "default_session"
 
         # Calculate TTL
-        ttl = timedelta(minutes=request.ttl_minutes) if request.ttl_minutes > 0 else None
+        ttl = (
+            timedelta(minutes=request.ttl_minutes) if request.ttl_minutes > 0 else None
+        )
 
         # Register with the virtual dataset registry
         registry = get_registry()
