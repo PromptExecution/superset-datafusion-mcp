@@ -189,12 +189,15 @@ async def ingest_dataframe(
             )
         )
 
+        virtual_dataset_id = f"virtual:{dataset_id}"
+
         return IngestDataFrameResponse(
             success=True,
             dataset=dataset_info,
             dataset_id=dataset_id,
+            virtual_dataset_id=virtual_dataset_id,
             usage_hint=(
-                f"Use 'virtual:{dataset_id}' as the dataset_id in generate_chart "
+                f"Use '{virtual_dataset_id}' as the dataset_id in generate_chart "
                 "or other visualization tools."
             ),
         )
