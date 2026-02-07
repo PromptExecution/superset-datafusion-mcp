@@ -169,9 +169,10 @@ async def query_virtual_dataset(
 
         # Convert to response format
         df = result_table.to_pandas()
-        rows = []
-        for _, row in df.iterrows():
-            rows.append({col: _convert_value(row[col]) for col in df.columns})
+        rows = df.to_dict("records")
+        for row in rows:
+            for col in row:
+                row[col] = _convert_value(row[col])
 
         columns = [{"name": col, "type": str(df[col].dtype)} for col in df.columns]
 
