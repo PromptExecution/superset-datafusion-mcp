@@ -490,27 +490,81 @@ def _build_registry_from_config() -> VirtualDatasetRegistry:
     """
     Build a registry using Flask configuration if available.
 
+    Reads the following configuration keys (all optional):
+    - MCP_VIRTUAL_DATASET_MAX_SIZE_MB (int): Maximum size in MB for a single
+      dataset. Default: 100. Must be > 0.
+    - MCP_VIRTUAL_DATASET_MAX_COUNT (int): Maximum number of datasets per
+      session. Default: 10. Must be > 0.
+    - MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES (int): Default time-to-live in
+      minutes for new datasets. Default: 60. Set to 0 to disable expiration.
+      Must be >= 0.
+
+    Invalid values (non-numeric or out of range) will log a warning and fall
+    back to the defaults.
+
     Returns:
         A VirtualDatasetRegistry configured from Flask config or defaults.
     """
+    from flask import current_app, has_app_context
+
+    # Default values
     max_size_mb = 100
     max_count = 10
     default_ttl_minutes = 60
 
-    try:
-        from flask import current_app
+    if has_app_context():
+        # Read and validate max_size_mb
+        raw_max_size = current_app.config.get("MCP_VIRTUAL_DATASET_MAX_SIZE_MB", 100)
+        try:
+            max_size_mb = int(raw_max_size)
+            if max_size_mb <= 0:
+                logger.warning(
+                    "MCP_VIRTUAL_DATASET_MAX_SIZE_MB must be > 0, got %s. Using default: 100",
+                    raw_max_size,
+                )
+                max_size_mb = 100
+        except (TypeError, ValueError):
+            logger.warning(
+                "MCP_VIRTUAL_DATASET_MAX_SIZE_MB must be an integer, got %s. Using default: 100",
+                raw_max_size,
+            )
+            max_size_mb = 100
 
-        if current_app:
-            max_size_mb = current_app.config.get(
-                "MCP_VIRTUAL_DATASET_MAX_SIZE_MB", 100
+        # Read and validate max_count
+        raw_max_count = current_app.config.get("MCP_VIRTUAL_DATASET_MAX_COUNT", 10)
+        try:
+            max_count = int(raw_max_count)
+            if max_count <= 0:
+                logger.warning(
+                    "MCP_VIRTUAL_DATASET_MAX_COUNT must be > 0, got %s. Using default: 10",
+                    raw_max_count,
+                )
+                max_count = 10
+        except (TypeError, ValueError):
+            logger.warning(
+                "MCP_VIRTUAL_DATASET_MAX_COUNT must be an integer, got %s. Using default: 10",
+                raw_max_count,
             )
-            max_count = current_app.config.get("MCP_VIRTUAL_DATASET_MAX_COUNT", 10)
-            default_ttl_minutes = current_app.config.get(
-                "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES", 60
+            max_count = 10
+
+        # Read and validate default_ttl_minutes
+        raw_ttl = current_app.config.get(
+            "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES", 60
+        )
+        try:
+            default_ttl_minutes = int(raw_ttl)
+            if default_ttl_minutes < 0:
+                logger.warning(
+                    "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES must be >= 0, got %s. Using default: 60",
+                    raw_ttl,
+                )
+                default_ttl_minutes = 60
+        except (TypeError, ValueError):
+            logger.warning(
+                "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES must be an integer, got %s. Using default: 60",
+                raw_ttl,
             )
-    except RuntimeError:
-        # Outside of Flask app context, use defaults.
-        pass
+            default_ttl_minutes = 60
 
     return VirtualDatasetRegistry(
         max_size_mb=max_size_mb,
@@ -533,19 +587,16 @@ def get_registry() -> VirtualDatasetRegistry:
     global _registry
 
     with _registry_lock:
-        try:
-            from flask import current_app
+        from flask import current_app, has_app_context
 
-            if current_app:
-                registry = current_app.extensions.get("mcp_virtual_dataset_registry")
-                if registry is None:
-                    registry = _build_registry_from_config()
-                    current_app.extensions["mcp_virtual_dataset_registry"] = registry
-                return registry
-        except RuntimeError:
-            # Outside of Flask app context, use the global singleton.
-            pass
+        if has_app_context():
+            registry = current_app.extensions.get("mcp_virtual_dataset_registry")
+            if registry is None:
+                registry = _build_registry_from_config()
+                current_app.extensions["mcp_virtual_dataset_registry"] = registry
+            return registry
 
+        # Outside of Flask app context, use the global singleton.
         if _registry is None:
             _registry = _build_registry_from_config()
 
@@ -554,12 +605,24 @@ def get_registry() -> VirtualDatasetRegistry:
 
 def reset_registry() -> None:
     """
-    Reset the global registry (primarily for testing).
+    Reset the registry (primarily for testing).
 
     This clears all registered datasets and creates a new registry instance.
+    When called within a Flask app context, it also clears the app-scoped
+    registry stored in current_app.extensions.
     """
     global _registry
     with _registry_lock:
+        from flask import current_app, has_app_context
+
+        # Clear app-scoped registry if in Flask context
+        if has_app_context():
+            registry = current_app.extensions.get("mcp_virtual_dataset_registry")
+            if registry is not None:
+                registry.shutdown()
+                del current_app.extensions["mcp_virtual_dataset_registry"]
+
+        # Clear global registry
         if _registry is not None:
             _registry.shutdown()
         _registry = None
