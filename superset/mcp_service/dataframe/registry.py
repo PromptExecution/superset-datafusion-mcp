@@ -195,7 +195,7 @@ class VirtualDatasetRegistry:
         name: str,
         table: pa.Table,
         session_id: str,
-        user_id: int | None,
+        user_id: int | None = None,
         ttl: timedelta | None = None,
         allow_cross_session: bool = False,
     ) -> str:
