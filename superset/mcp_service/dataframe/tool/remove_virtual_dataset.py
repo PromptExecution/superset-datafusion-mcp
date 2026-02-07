@@ -34,6 +34,7 @@ from superset.mcp_service.dataframe.schemas import (
     RemoveVirtualDatasetResponse,
 )
 from superset.mcp_service.utils.schema_utils import parse_request
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -60,20 +61,41 @@ async def remove_virtual_dataset(
 
     try:
         registry = get_registry()
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
 
+        session_id = getattr(ctx, "session_id", None)
+        if session_id is None:
+            if user_id is None:
+                message = (
+                    "Missing session and user context; cannot safely remove "
+                    f"virtual dataset '{request.dataset_id}'"
+                )
+                await ctx.error(message)
+                return RemoveVirtualDatasetResponse(
+                    success=False,
+                    message=message,
+                )
+            session_id = f"user_{user_id}"
         # Check if dataset exists
-        dataset = registry.get(request.dataset_id)
+        dataset = registry.get(
+            request.dataset_id, session_id=session_id, user_id=user_id
+        )
         if dataset is None:
             return RemoveVirtualDatasetResponse(
                 success=False,
                 message=(
                     f"Virtual dataset '{request.dataset_id}' "
-                    "not found or already expired"
+                    "not found, already expired, or access denied"
                 ),
             )
 
         # Remove the dataset
-        removed = registry.remove(request.dataset_id)
+        removed = registry.remove(
+            request.dataset_id, session_id=session_id, user_id=user_id
+        )
 
         if removed:
             await ctx.info("Virtual dataset removed successfully")

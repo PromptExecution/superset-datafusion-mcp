@@ -34,6 +34,7 @@ from superset.mcp_service.dataframe.schemas import (
     ListVirtualDatasetsResponse,
     VirtualDatasetInfo,
 )
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,14 @@ async def list_virtual_datasets(ctx: Context) -> ListVirtualDatasetsResponse:
     try:
         # Get session ID from context
         session_id = getattr(ctx, "session_id", None) or "default_session"
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
 
         # Get registry and list datasets
         registry = get_registry()
-        datasets_raw = registry.list_datasets(session_id=session_id)
+        datasets_raw = registry.list_datasets(session_id=session_id, user_id=user_id)
 
         # Convert to response format
         datasets = []
@@ -68,7 +73,9 @@ async def list_virtual_datasets(ctx: Context) -> ListVirtualDatasetsResponse:
             if not isinstance(ds_id, str):
                 continue  # Skip invalid entries
 
-            full_dataset = registry.get(ds_id)
+            full_dataset = registry.get(
+                ds_id, session_id=session_id, user_id=user_id
+            )
             columns = full_dataset.get_column_info() if full_dataset else []
 
             # Safe type assertions with defaults

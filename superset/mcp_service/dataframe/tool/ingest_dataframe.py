@@ -39,6 +39,7 @@ from superset.mcp_service.dataframe.schemas import (
     VirtualDatasetInfo,
 )
 from superset.mcp_service.utils.schema_utils import parse_request
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,19 @@ async def ingest_dataframe(
     )
 
     try:
+        registry = get_registry()
+
+        estimated_bytes = (len(request.data) * 3) // 4
+        if estimated_bytes > registry.max_size_bytes:
+            return IngestDataFrameResponse(
+                success=False,
+                error=(
+                    "Dataset payload exceeds size limit "
+                    f"({registry.max_size_bytes / 1024 / 1024:.2f} MB)"
+                ),
+                error_code="PAYLOAD_TOO_LARGE",
+            )
+
         # Decode base64 data
         try:
             raw_data = base64.b64decode(request.data)
@@ -132,22 +146,40 @@ async def ingest_dataframe(
             % (table.num_rows, table.num_columns)
         )
 
-        # Get session ID from context
-        session_id = getattr(ctx, "session_id", None) or "default_session"
+        # Get user and session IDs
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
 
+        session_id = getattr(ctx, "session_id", None)
+        if not session_id:
+            if user_id is not None:
+                # Derive a per-user fallback session ID to avoid cross-user collisions
+                session_id = f"user_{user_id}"
+            else:
+                logger.error(
+                    "Missing both session_id and user_id; refusing to ingest DataFrame"
+                )
+                return IngestDataFrameResponse(
+                    success=False,
+                    error="Missing session and user context; cannot safely ingest DataFrame",
+                    error_code="MISSING_SESSION_CONTEXT",
+                )
         # Calculate TTL
         ttl = (
             timedelta(minutes=request.ttl_minutes) if request.ttl_minutes > 0 else None
         )
 
         # Register with the virtual dataset registry
-        registry = get_registry()
         try:
             dataset_id = registry.register(
                 name=request.name,
                 table=table,
                 session_id=session_id,
+                user_id=user_id,
                 ttl=ttl,
+                allow_cross_session=request.allow_cross_session,
             )
         except ValueError as e:
             logger.error("Failed to register virtual dataset: %s", e)
@@ -158,7 +190,7 @@ async def ingest_dataframe(
             )
 
         # Retrieve the registered dataset for response
-        dataset = registry.get(dataset_id)
+        dataset = registry.get(dataset_id, session_id=session_id, user_id=user_id)
         if dataset is None:
             return IngestDataFrameResponse(
                 success=False,

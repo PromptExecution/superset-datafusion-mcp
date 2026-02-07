@@ -93,6 +93,13 @@ class IngestDataFrameRequest(BaseModel):
             "(cleaned up when session ends). Default is 60 minutes."
         ),
     )
+    allow_cross_session: bool = Field(
+        default=False,
+        description=(
+            "Allow access to this virtual dataset from other MCP sessions "
+            "belonging to the same user. Defaults to False."
+        ),
+    )
     description: str | None = Field(
         default=None,
         max_length=500,
