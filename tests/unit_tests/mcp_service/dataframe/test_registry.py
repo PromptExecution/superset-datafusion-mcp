@@ -297,3 +297,168 @@ def test_registry_total_size_and_count(
 
     assert registry.total_count == 2
     assert registry.total_size_bytes > 0
+
+
+def test_registry_flask_app_scoped(sample_table: pa.Table) -> None:
+    """Test that registry is scoped to Flask app when in app context."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry, reset_registry
+
+    # Create two separate Flask apps
+    app1 = Flask("test_app_1")
+    app2 = Flask("test_app_2")
+
+    # Reset registry to ensure clean state
+    reset_registry()
+
+    # Get registry in app1 context
+    with app1.app_context():
+        registry1 = get_registry()
+        dataset_id_1 = registry1.register(
+            name="app1_dataset", table=sample_table, session_id="session-1"
+        )
+        assert registry1.total_count == 1
+
+    # Get registry in app2 context - should be a different registry
+    with app2.app_context():
+        registry2 = get_registry()
+        # Should be empty initially
+        assert registry2.total_count == 0
+
+        dataset_id_2 = registry2.register(
+            name="app2_dataset", table=sample_table, session_id="session-2"
+        )
+        assert registry2.total_count == 1
+
+    # Verify the registries are independent
+    with app1.app_context():
+        registry1_again = get_registry()
+        assert registry1_again.total_count == 1
+        assert registry1_again.get(dataset_id_1) is not None
+        assert registry1_again.get(dataset_id_2) is None
+
+    with app2.app_context():
+        registry2_again = get_registry()
+        assert registry2_again.total_count == 1
+        assert registry2_again.get(dataset_id_2) is not None
+        assert registry2_again.get(dataset_id_1) is None
+
+
+def test_registry_flask_config_overrides(sample_table: pa.Table) -> None:
+    """Test that Flask config values override defaults."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry, reset_registry
+
+    app = Flask("test_app")
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 5
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = 3
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = 15
+
+    reset_registry()
+
+    with app.app_context():
+        registry = get_registry()
+
+        # Verify config values were applied
+        assert registry._max_size_bytes == 5 * 1024 * 1024
+        assert registry._max_count == 3
+        assert registry._default_ttl == timedelta(minutes=15)
+
+        # Test that count limit is enforced
+        for i in range(3):
+            registry.register(
+                name=f"dataset_{i}", table=sample_table, session_id="session-1"
+            )
+
+        with pytest.raises(ValueError, match="maximum dataset count"):
+            registry.register(
+                name="dataset_4", table=sample_table, session_id="session-1"
+            )
+
+
+def test_registry_flask_config_string_values(sample_table: pa.Table) -> None:
+    """Test that Flask config handles string values correctly."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry, reset_registry
+
+    app = Flask("test_app")
+    # Config values might come as strings from env vars
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = "20"
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = "7"
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = "45"
+
+    reset_registry()
+
+    with app.app_context():
+        registry = get_registry()
+
+        # Should be coerced to integers
+        assert registry._max_size_bytes == 20 * 1024 * 1024
+        assert registry._max_count == 7
+        assert registry._default_ttl == timedelta(minutes=45)
+
+
+def test_registry_flask_config_invalid_values(sample_table: pa.Table) -> None:
+    """Test that invalid Flask config values fall back to defaults."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry, reset_registry
+
+    app = Flask("test_app")
+    # Invalid config values
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = "invalid"
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = -5
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = -10
+
+    reset_registry()
+
+    with app.app_context():
+        registry = get_registry()
+
+        # Should fall back to defaults
+        assert registry._max_size_bytes == 100 * 1024 * 1024
+        assert registry._max_count == 10
+        assert registry._default_ttl == timedelta(minutes=60)
+
+
+def test_registry_reset_clears_app_scoped(sample_table: pa.Table) -> None:
+    """Test that reset_registry clears app-scoped registry."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry, reset_registry
+
+    app = Flask("test_app")
+
+    with app.app_context():
+        # Create and populate registry
+        registry = get_registry()
+        registry.register(name="dataset", table=sample_table, session_id="session-1")
+        assert registry.total_count == 1
+
+        # Reset should clear it
+        reset_registry()
+
+        # Get registry again - should be fresh
+        new_registry = get_registry()
+        assert new_registry.total_count == 0
+
+
+def test_registry_cached_on_app_extensions(sample_table: pa.Table) -> None:
+    """Test that registry is cached on current_app.extensions."""
+    from flask import Flask
+
+    from superset.mcp_service.dataframe.registry import get_registry
+
+    app = Flask("test_app")
+
+    with app.app_context():
+        # First call creates and caches
+        registry1 = get_registry()
+        assert "mcp_virtual_dataset_registry" in app.extensions
+
+        # Second call should return the same instance
+        registry2 = get_registry()
+        assert registry1 is registry2
