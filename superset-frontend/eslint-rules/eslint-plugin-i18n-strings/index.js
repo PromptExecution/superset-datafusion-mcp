@@ -22,40 +22,27 @@
  * @author Apache
  */
 
-import type { Rule } from 'eslint';
-import type { Node } from 'estree';
-
 //------------------------------------------------------------------------------
 // Rule Definition
 //------------------------------------------------------------------------------
 
-const plugin: { rules: Record<string, Rule.RuleModule> } = {
+/** @type {import('eslint').Rule.RuleModule} */
+module.exports = {
   rules: {
     'no-template-vars': {
-      meta: {
-        type: 'problem',
-        docs: {
-          description: 'Disallow variables in translation template strings',
-        },
-        schema: [],
-      },
-      create(context: Rule.RuleContext): Rule.RuleListener {
-        function handler(node: Node): void {
-          const callNode = node as Node & {
-            arguments: Array<Node & { type: string; expressions?: Node[] }>;
-          };
-          // Check all arguments (e.g., tn has singular and plural templates)
-          for (const arg of callNode.arguments ?? []) {
+      create(context) {
+        function handler(node) {
+          if (node.arguments.length) {
+            const firstArgs = node.arguments[0];
             if (
-              arg.type === 'TemplateLiteral' &&
-              (arg as Node & { expressions?: Node[] }).expressions?.length
+              firstArgs.type === 'TemplateLiteral' &&
+              firstArgs.expressions.length
             ) {
               context.report({
                 node,
                 message:
                   "Don't use variables in translation string templates. Flask-babel is a static translation service, so it can't handle strings that include variables",
               });
-              break; // Only report once per call
             }
           }
         }
@@ -66,29 +53,19 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
       },
     },
     'sentence-case-buttons': {
-      meta: {
-        type: 'suggestion',
-        docs: {
-          description: 'Enforce sentence case for button text in translations',
-        },
-        schema: [],
-      },
-      create(context: Rule.RuleContext): Rule.RuleListener {
-        function isTitleCase(str: string): boolean {
+      create(context) {
+        function isTitleCase(str) {
           // Match "Delete Dataset", "Create Chart", etc. (2+ title-cased words)
           return /^[A-Z][a-z]+(\s+[A-Z][a-z]*)+$/.test(str);
         }
 
-        function isButtonContext(node: Node & { parent?: Node }): boolean {
-          const { parent } = node as Node & {
-            parent?: Node & Record<string, unknown>;
-          };
+        function isButtonContext(node) {
+          const { parent } = node;
           if (!parent) return false;
 
           // Check for button-specific props
           if (parent.type === 'Property') {
-            const key = (parent as unknown as { key: { name: string } }).key
-              .name;
+            const key = parent.key.name;
             return [
               'primaryButtonName',
               'secondaryButtonName',
@@ -98,16 +75,10 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
           }
 
           // Check for Button components
-          // Cast to string because ESTree Node type doesn't include JSX types
-          if ((parent.type as string) === 'JSXExpressionContainer') {
-            const jsx = (parent as Node & { parent?: Node }).parent as
-              | (Node & {
-                  type: string;
-                  openingElement?: { name: { name: string } };
-                })
-              | undefined;
-            if ((jsx?.type as string) === 'JSXElement') {
-              const elementName = jsx?.openingElement?.name.name;
+          if (parent.type === 'JSXExpressionContainer') {
+            const jsx = parent.parent;
+            if (jsx?.type === 'JSXElement') {
+              const elementName = jsx.openingElement.name.name;
               return elementName === 'Button';
             }
           }
@@ -115,24 +86,21 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
           return false;
         }
 
-        function handler(node: Node): void {
-          const callNode = node as Node & {
-            arguments: Array<Node & { type: string; value?: unknown }>;
-          };
-          // Check all string literal arguments (e.g., tn has singular and plural)
-          for (const arg of callNode.arguments ?? []) {
-            if (arg.type === 'Literal' && typeof arg.value === 'string') {
-              const text = arg.value;
+        function handler(node) {
+          if (node.arguments.length) {
+            const firstArg = node.arguments[0];
+            if (
+              firstArg.type === 'Literal' &&
+              typeof firstArg.value === 'string'
+            ) {
+              const text = firstArg.value;
 
-              if (
-                isButtonContext(node as Node & { parent?: Node }) &&
-                isTitleCase(text)
-              ) {
+              if (isButtonContext(node) && isTitleCase(text)) {
                 const sentenceCase = text
                   .toLowerCase()
-                  .replace(/^\w/, (c: string) => c.toUpperCase());
+                  .replace(/^\w/, c => c.toUpperCase());
                 context.report({
-                  node: arg,
+                  node: firstArg,
                   message: `Button text should use sentence case: "${text}" should be "${sentenceCase}"`,
                 });
               }
@@ -148,5 +116,3 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
     },
   },
 };
-
-module.exports = plugin;

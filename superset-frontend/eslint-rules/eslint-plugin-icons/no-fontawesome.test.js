@@ -22,20 +22,16 @@
  * @author Apache
  */
 
-import type { Rule } from 'eslint';
-
 const { RuleTester } = require('eslint');
-const plugin: { rules: Record<string, Rule.RuleModule> } = require('.');
+const plugin = require('.');
 
 //------------------------------------------------------------------------------
 // Tests
 //------------------------------------------------------------------------------
-const ruleTester = new RuleTester({
-  parserOptions: { ecmaVersion: 6, ecmaFeatures: { jsx: true } },
-});
-const rule: Rule.RuleModule = plugin.rules['no-fa-icons-usage'];
+const ruleTester = new RuleTester({ parserOptions: { ecmaVersion: 6 } });
+const rule = plugin.rules['no-fa-icons-usage'];
 
-const errors: Array<{ message: string }> = [
+const errors = [
   {
     message:
       'FontAwesome icons should not be used. Use the src/components/Icons component instead.',
