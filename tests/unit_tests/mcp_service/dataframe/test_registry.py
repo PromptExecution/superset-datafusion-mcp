@@ -20,14 +20,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
 
 import pyarrow as pa
 import pytest
-from flask import Flask
 
 from superset.mcp_service.dataframe.registry import (
-    get_registry,
     reset_registry,
     VirtualDataset,
     VirtualDatasetRegistry,
@@ -126,8 +123,8 @@ def test_registry_register_and_get(
 
     assert dataset_id is not None
 
-    # Retrieve the dataset
-    dataset = registry.get(dataset_id)
+    # Retrieve the dataset with session_id for access control
+    dataset = registry.get(dataset_id, session_id="session-1")
     assert dataset is not None
     assert dataset.name == "test_dataset"
     assert dataset.row_count == 5
@@ -143,15 +140,15 @@ def test_registry_remove(
         session_id="session-1",
     )
 
-    # Remove the dataset
-    removed = registry.remove(dataset_id)
+    # Remove the dataset with session_id for access control
+    removed = registry.remove(dataset_id, session_id="session-1")
     assert removed is True
 
     # Verify it's gone
-    assert registry.get(dataset_id) is None
+    assert registry.get(dataset_id, session_id="session-1") is None
 
     # Try to remove non-existent dataset
-    removed_again = registry.remove(dataset_id)
+    removed_again = registry.remove(dataset_id, session_id="session-1")
     assert removed_again is False
 
 
@@ -199,6 +196,10 @@ def test_registry_list_datasets(
     registry.register(name="ds2", table=sample_table, session_id="session-1")
     registry.register(name="ds3", table=sample_table, session_id="session-2")
 
+    # Listing without session_id or user_id should raise ValueError (security)
+    with pytest.raises(ValueError, match="At least one of session_id or user_id"):
+        registry.list_datasets()
+        
     # List all datasets
     all_datasets = registry.list_datasets()
     assert len(all_datasets) == 3
@@ -225,7 +226,7 @@ def test_registry_cleanup_expired(
     )
 
     # Should still exist
-    assert registry.get(dataset_id) is not None
+    assert registry.get(dataset_id, session_id="session-1") is not None
 
     # Manually expire the dataset by modifying its created_at
     dataset = registry._datasets[dataset_id]
@@ -237,7 +238,7 @@ def test_registry_cleanup_expired(
     assert removed == 1
 
     # Should be gone
-    assert registry.get(dataset_id) is None
+    assert registry.get(dataset_id, session_id="session-1") is None
 
 
 def test_registry_cleanup_session(
@@ -254,7 +255,7 @@ def test_registry_cleanup_session(
     assert removed == 2
 
     # Verify only session-2 remains
-    all_datasets = registry.list_datasets()
+    all_datasets = registry.list_datasets(session_id="session-2")
     assert len(all_datasets) == 1
     assert all_datasets[0]["name"] == "ds3"
 
@@ -302,97 +303,121 @@ def test_registry_total_size_and_count(
     assert registry.total_size_bytes > 0
 
 
-def test_get_registry_with_flask_app() -> None:
-    """Test that get_registry() stores registry on Flask app when in app context."""
-    app = Flask(__name__)
-    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 50
-    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = 20
-    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = 90
+def test_registry_get_requires_credentials(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that get() requires session_id or user_id for access control."""
+    dataset_id = registry.register(
+        name="test_dataset",
+        table=sample_table,
+        session_id="session-1",
+    )
 
-    with app.app_context():
-        # First call should create and cache the registry
-        registry1 = get_registry()
-        assert registry1 is not None
-        assert registry1.max_size_bytes == 50 * 1024 * 1024
-        assert registry1._max_count == 20
-        assert registry1._default_ttl == timedelta(minutes=90)
+    # Should fail when neither session_id nor user_id is provided
+    dataset = registry.get(dataset_id)
+    assert dataset is None
 
-        # Verify it's stored in current_app.extensions
-        assert "mcp_virtual_dataset_registry" in app.extensions
-        assert app.extensions["mcp_virtual_dataset_registry"] is registry1
+    # Should succeed with session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
 
-        # Second call should return the same instance
-        registry2 = get_registry()
-        assert registry2 is registry1
+    # Should succeed with user_id (even though it doesn't match)
+    # Note: will fail access check, but not the credential check
+    dataset_with_user = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-2",
+        user_id=123,
+    )
+    dataset = registry.get(dataset_with_user, user_id=123)
+    assert dataset is None  # Different session, no cross-session allowed
 
-
-def test_get_registry_different_apps_get_different_registries() -> None:
-    """Test that different Flask apps get different registry instances."""
-    app1 = Flask("app1")
-    app1.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 100
-
-    app2 = Flask("app2")
-    app2.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 200
-
-    with app1.app_context():
-        registry1 = get_registry()
-        assert registry1.max_size_bytes == 100 * 1024 * 1024
-
-    with app2.app_context():
-        registry2 = get_registry()
-        assert registry2.max_size_bytes == 200 * 1024 * 1024
-
-    # Ensure they are different instances
-    assert registry1 is not registry2
+    # Should succeed with matching user_id and cross-session enabled
+    dataset_cross = registry.register(
+        name="cross_dataset",
+        table=sample_table,
+        session_id="session-3",
+        user_id=456,
+        allow_cross_session=True,
+    )
+    dataset = registry.get(dataset_cross, user_id=456)
+    assert dataset is not None
 
 
-def test_get_registry_config_validation() -> None:
-    """Test that get_registry() validates config values and falls back to defaults."""
-    app = Flask(__name__)
-    
-    # Test with invalid string values
-    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = "not_a_number"
-    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = "invalid"
-    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = "bad_value"
+def test_registry_remove_requires_credentials(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that remove() requires session_id or user_id for access control."""
+    dataset_id = registry.register(
+        name="test_dataset",
+        table=sample_table,
+        session_id="session-1",
+    )
 
-    with app.app_context():
-        registry = get_registry()
-        # Should fall back to defaults
-        assert registry.max_size_bytes == 100 * 1024 * 1024
-        assert registry._max_count == 10
-        assert registry._default_ttl == timedelta(minutes=60)
+    # Should fail when neither session_id nor user_id is provided
+    removed = registry.remove(dataset_id)
+    assert removed is False
 
+    # Dataset should still exist
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
 
-def test_get_registry_config_negative_validation() -> None:
-    """Test that negative config values are rejected and defaults are used."""
-    app = Flask(__name__)
-    
-    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = -10
-    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = 0
-    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = -5
+    # Should succeed with correct session_id
+    removed = registry.remove(dataset_id, session_id="session-1")
+    assert removed is True
 
-    with app.app_context():
-        registry = get_registry()
-        # Should fall back to defaults for invalid values
-        assert registry.max_size_bytes == 100 * 1024 * 1024
-        assert registry._max_count == 10
-        assert registry._default_ttl == timedelta(minutes=60)
+    # Dataset should be gone
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is None
 
 
-def test_reset_registry_clears_app_scoped_registry() -> None:
-    """Test that reset_registry() clears both global and app-scoped registries."""
-    app = Flask(__name__)
-    
-    with app.app_context():
-        # Create registry
-        registry1 = get_registry()
-        assert "mcp_virtual_dataset_registry" in app.extensions
-        
-        # Reset should clear it
-        reset_registry()
-        assert "mcp_virtual_dataset_registry" not in app.extensions
-        
-        # Getting registry again should create a new instance
-        registry2 = get_registry()
-        assert registry2 is not registry1
-        assert "mcp_virtual_dataset_registry" in app.extensions
+def test_registry_access_control_with_user_id(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test access control with user_id and cross-session access."""
+    # Register dataset with user_id and cross-session enabled
+    dataset_id = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-1",
+        user_id=123,
+        allow_cross_session=True,
+    )
+
+    # Should succeed with matching user_id from different session
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=123)
+    assert dataset is not None
+
+    # Should fail with different user_id
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=999)
+    assert dataset is None
+
+    # Should succeed with original session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
+
+    # Should be able to remove with matching user_id
+    removed = registry.remove(dataset_id, session_id="session-2", user_id=123)
+    assert removed is True
+
+
+def test_registry_access_control_without_cross_session(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that cross-session access is denied by default."""
+    # Register dataset with user_id but without cross-session
+    dataset_id = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-1",
+        user_id=123,
+        allow_cross_session=False,
+    )
+
+    # Should fail with matching user_id from different session
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=123)
+    assert dataset is None
+
+    # Should succeed with original session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None

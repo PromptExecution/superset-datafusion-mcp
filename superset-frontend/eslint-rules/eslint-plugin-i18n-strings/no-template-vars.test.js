@@ -22,19 +22,17 @@
  * @author Apache
  */
 /* eslint-disable no-template-curly-in-string */
-import type { Rule } from 'eslint';
-
 const { RuleTester } = require('eslint');
-const plugin: { rules: Record<string, Rule.RuleModule> } = require('.');
+const plugin = require('.');
 
 //------------------------------------------------------------------------------
 // Tests
 //------------------------------------------------------------------------------
 
 const ruleTester = new RuleTester({ parserOptions: { ecmaVersion: 6 } });
-const rule: Rule.RuleModule = plugin.rules['no-template-vars'];
+const rule = plugin.rules['no-template-vars'];
 
-const errors: Array<{ type: string }> = [
+const errors = [
   {
     type: 'CallExpression',
   },

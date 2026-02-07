@@ -143,6 +143,7 @@ def test_ingest_dataframe_response_success() -> None:
     )
     assert response.success is True
     assert response.dataset_id == "abc123"
+    assert response.virtual_dataset_id == "virtual:abc123"
     assert response.error is None
 
 
