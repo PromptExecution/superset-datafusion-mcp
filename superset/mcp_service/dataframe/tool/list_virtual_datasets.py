@@ -18,7 +18,7 @@
 """
 List Virtual Datasets MCP Tool
 
-Lists all virtual datasets available in the current session.
+Lists all virtual datasets accessible to the current user and session.
 """
 
 from __future__ import annotations
@@ -42,11 +42,15 @@ logger = logging.getLogger(__name__)
 @tool(tags=["dataframe"])
 async def list_virtual_datasets(ctx: Context) -> ListVirtualDatasetsResponse:
     """
-    List all virtual datasets in the current session.
+    List all virtual datasets accessible to the current user and session.
 
     Virtual datasets are in-memory DataFrames that have been ingested
     via the ingest_dataframe tool. They can be used with generate_chart
     and other visualization tools using the 'virtual:{dataset_id}' format.
+
+    This tool returns datasets that:
+    - Belong to the current session, OR
+    - Belong to other sessions created by the same user when allow_cross_session=True
 
     Returns:
         List of virtual datasets with their metadata.
