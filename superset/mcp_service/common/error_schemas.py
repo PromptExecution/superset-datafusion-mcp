@@ -50,7 +50,7 @@ class DatasetContext(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-    id: int = Field(..., description="Dataset ID")
+    id: int | str = Field(..., description="Dataset ID")
     table_name: str = Field(..., description="Table name")
     schema_name: str | None = Field(
         None,

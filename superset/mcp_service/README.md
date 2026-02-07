@@ -85,7 +85,7 @@ git clone https://github.com/apache/superset.git
 cd superset
 
 # 2. Set up Python environment (Python 3.10 or 3.11 required)
-python3 -m venv venv
+uv venv venv
 source venv/bin/activate
 
 # 3. Install dependencies

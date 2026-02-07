@@ -339,7 +339,7 @@ print(json.dumps(debug_info), file=sys.stderr)
 
 print(json.dumps(databases, default=str))
 `;
-    const result = spawnSync('python3', ['-c', pythonCode], {
+    const result = spawnSync('uv', ['run', 'python', '-c', pythonCode], {
       cwd: ROOT_DIR,
       encoding: 'utf-8',
       timeout: 30000,
@@ -767,7 +767,7 @@ function extractCustomErrors() {
 
   try {
     const scriptPath = path.join(__dirname, 'extract_custom_errors.py');
-    const result = spawnSync('python3', [scriptPath], {
+    const result = spawnSync('uv', ['run', 'python', scriptPath], {
       cwd: ROOT_DIR,
       encoding: 'utf-8',
       timeout: 30000,

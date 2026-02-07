@@ -38,8 +38,8 @@ from superset.mcp_service.dataframe.schemas import (
     IngestDataFrameResponse,
     VirtualDatasetInfo,
 )
+from superset.mcp_service.dataframe.tool.context import resolve_session_and_user
 from superset.mcp_service.utils.schema_utils import parse_request
-from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,10 @@ async def ingest_dataframe(
 
     This tool allows AI agents to upload DataFrame data directly without
     requiring database storage. The data is registered as a virtual dataset
-    that can be used with generate_chart and other visualization tools.
+    that can be queried and managed via DataFrame MCP tools.
 
-    IMPORTANT: Use 'virtual:{dataset_id}' format when referencing the
-    dataset in generate_chart or other tools.
+    IMPORTANT: Store the returned dataset_id for follow-up calls to
+    query_virtual_dataset, list_virtual_datasets, and remove_virtual_dataset.
 
     Example workflow (Python):
     ```python
@@ -84,15 +84,10 @@ async def ingest_dataframe(
         "ttl_minutes": 60
     })
 
-    # 4. Use with generate_chart
-    chart = await generate_chart({
-        "dataset_id": f"virtual:{result.dataset_id}",
-        "config": {
-            "chart_type": "xy",
-            "x": {"name": "date"},
-            "y": [{"name": "sales", "aggregate": "SUM"}],
-            "kind": "line"
-        }
+    # 4. Query with virtual dataset tools
+    rows = await query_virtual_dataset({
+        "dataset_id": result.dataset_id,
+        "sql": "SELECT region, SUM(sales) AS total FROM data GROUP BY region"
     })
     ```
 
@@ -146,26 +141,17 @@ async def ingest_dataframe(
             % (table.num_rows, table.num_columns)
         )
 
-        # Get user and session IDs
-        try:
-            user_id = get_user_id()
-        except Exception:
-            user_id = None
-
-        session_id = getattr(ctx, "session_id", None)
+        # Resolve identity context for access control.
+        session_id, user_id = resolve_session_and_user(ctx)
         if not session_id:
-            if user_id is not None:
-                # Derive a per-user fallback session ID to avoid cross-user collisions
-                session_id = f"user_{user_id}"
-            else:
-                logger.error(
-                    "Missing both session_id and user_id; refusing to ingest DataFrame"
-                )
-                return IngestDataFrameResponse(
-                    success=False,
-                    error="Missing session and user context; cannot safely ingest DataFrame",
-                    error_code="MISSING_SESSION_CONTEXT",
-                )
+            logger.error(
+                "Missing both session_id and user_id; refusing to ingest DataFrame"
+            )
+            return IngestDataFrameResponse(
+                success=False,
+                error="Missing session and user context; cannot safely ingest DataFrame",
+                error_code="MISSING_SESSION_CONTEXT",
+            )
         # Calculate TTL
         ttl = (
             timedelta(minutes=request.ttl_minutes)
@@ -231,8 +217,10 @@ async def ingest_dataframe(
             dataset_id=dataset_id,
             virtual_dataset_id=virtual_dataset_id,
             usage_hint=(
-                f"Use '{virtual_dataset_id}' as the dataset_id in generate_chart "
-                "or other visualization tools."
+                f"Use '{dataset_id}' with query_virtual_dataset and "
+                "remove_virtual_dataset. Keep "
+                f"'{virtual_dataset_id}' for integrations that require "
+                "prefixed virtual dataset IDs."
             ),
         )
 

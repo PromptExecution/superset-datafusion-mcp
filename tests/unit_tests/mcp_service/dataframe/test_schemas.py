@@ -19,15 +19,22 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
 
 from superset.mcp_service.dataframe.schemas import (
     ColumnSchema,
+    DataFrameSourceCapability,
+    DataFusionQueryResponse,
+    DataFusionQueryRequest,
+    DataFusionSourceConfig,
     IngestDataFrameRequest,
     IngestDataFrameResponse,
+    ListSourceCapabilitiesRequest,
+    ListSourceCapabilitiesResponse,
+    PrometheusQueryRequest,
     VirtualDatasetInfo,
 )
 
@@ -158,3 +165,117 @@ def test_ingest_dataframe_response_error() -> None:
     assert response.dataset is None
     assert response.error == "Dataset size exceeds limit"
     assert response.error_code == "SIZE_LIMIT_EXCEEDED"
+
+
+def test_prometheus_query_request_defaults() -> None:
+    """Test PrometheusQueryRequest with minimal valid fields."""
+    request = PrometheusQueryRequest(
+        base_url="http://prometheus:9090",
+        promql="up",
+    )
+    assert request.query_type == "range"
+    assert request.step_seconds == 60
+    assert request.ingest_as_virtual_dataset is True
+
+
+def test_datafusion_source_config_validation() -> None:
+    """Test DataFusion source validation by source type."""
+    parquet_source = DataFusionSourceConfig(
+        name="metrics",
+        source_type="parquet",
+        path="/tmp/data.parquet",
+    )
+    assert parquet_source.path == "/tmp/data.parquet"
+
+    with pytest.raises(ValidationError):
+        DataFusionSourceConfig(name="bad", source_type="parquet")
+
+    with pytest.raises(ValidationError):
+        DataFusionSourceConfig(name="bad", source_type="arrow_ipc")
+
+    with pytest.raises(ValidationError):
+        DataFusionSourceConfig(name="bad", source_type="virtual_dataset")
+
+
+def test_datafusion_query_request_validation() -> None:
+    """Test DataFusion query request schema validation."""
+    request = DataFusionQueryRequest(
+        sql="SELECT * FROM metrics",
+        sources=[
+            DataFusionSourceConfig(
+                name="metrics",
+                source_type="parquet",
+                path="/tmp/data.parquet",
+            )
+        ],
+        ingest_result=True,
+    )
+    assert request.limit == 1000
+    assert request.ingest_result is True
+
+    with pytest.raises(ValidationError):
+        DataFusionQueryRequest(sql="SELECT 1", sources=[])
+
+
+def test_prometheus_query_request_time_window_validation() -> None:
+    """Test range query time window validation."""
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValidationError):
+        PrometheusQueryRequest(
+            base_url="http://prometheus:9090",
+            promql="up",
+            query_type="range",
+            start_time=now,
+            end_time=now - timedelta(minutes=5),
+        )
+
+
+def test_datafusion_query_response_source_capabilities() -> None:
+    """DataFusion responses accept source capability metadata."""
+    response = DataFusionQueryResponse(
+        success=True,
+        rows=[{"value": 1}],
+        columns=[{"name": "value", "type": "int64"}],
+        row_count=1,
+        source_capabilities=[
+            DataFrameSourceCapability(
+                source_type="parquet",
+                adapter_name="ParquetSourceAdapter",
+                supports_streaming=True,
+                supports_projection_pushdown=True,
+                supports_predicate_pushdown=True,
+                supports_sql_pushdown=True,
+                supports_virtual_dataset_ingestion=True,
+            )
+        ],
+    )
+    assert len(response.source_capabilities) == 1
+    assert response.source_capabilities[0].source_type == "parquet"
+
+
+def test_list_source_capabilities_schemas() -> None:
+    """Capability list request/response schemas validate correctly."""
+    request = ListSourceCapabilitiesRequest(
+        source_types=["parquet", "virtual_dataset"],
+        include_prometheus=False,
+    )
+    assert request.source_types == ["parquet", "virtual_dataset"]
+    assert request.include_prometheus is False
+
+    response = ListSourceCapabilitiesResponse(
+        success=True,
+        capabilities=[
+            DataFrameSourceCapability(
+                source_type="parquet",
+                adapter_name="ParquetSourceAdapter",
+                supports_streaming=True,
+                supports_projection_pushdown=True,
+                supports_predicate_pushdown=True,
+                supports_sql_pushdown=True,
+                supports_virtual_dataset_ingestion=True,
+            )
+        ],
+        total_count=1,
+    )
+    assert response.success is True
+    assert response.total_count == 1

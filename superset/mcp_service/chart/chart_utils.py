@@ -32,7 +32,13 @@ from superset.mcp_service.chart.schemas import (
     TableChartConfig,
     XYChartConfig,
 )
+from superset.mcp_service.dataframe.identifiers import (
+    extract_virtual_dataset_id,
+    is_virtual_dataset_identifier,
+)
+from superset.mcp_service.dataframe.registry import get_registry
 from superset.mcp_service.utils.url_utils import get_superset_base_url
+from superset.utils.core import get_user_id
 from superset.utils import json
 
 logger = logging.getLogger(__name__)
@@ -53,6 +59,11 @@ def generate_explore_link(dataset_id: int | str, form_data: Dict[str, Any]) -> s
     base_url = get_superset_base_url()
     numeric_dataset_id = None
     dataset = None
+
+    if is_virtual_dataset_identifier(dataset_id):
+        # Virtual datasets do not map to persisted Superset datasource IDs,
+        # so they cannot produce an /explore form_data_key URL.
+        return ""
 
     try:
         if isinstance(dataset_id, int) or (
@@ -130,6 +141,27 @@ def is_column_truly_temporal(column_name: str, dataset_id: int | str | None) -> 
         return True  # Default to temporal if we can't check (backward compatible)
 
     try:
+        raw_virtual_dataset_id = extract_virtual_dataset_id(dataset_id)
+        if raw_virtual_dataset_id:
+            import pyarrow as pa
+
+            try:
+                user_id = get_user_id()
+            except Exception:
+                user_id = None
+            registry = get_registry()
+            virtual_dataset = registry.get(
+                raw_virtual_dataset_id,
+                session_id=None,
+                user_id=user_id,
+            )
+            if not virtual_dataset:
+                return True
+            for field in virtual_dataset.schema:
+                if field.name.lower() == column_name.lower():
+                    return pa.types.is_temporal(field.type)
+            return True
+
         # Find dataset
         if isinstance(dataset_id, int) or (
             isinstance(dataset_id, str) and dataset_id.isdigit()

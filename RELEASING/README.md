@@ -434,7 +434,7 @@ Create a virtual environment and install the dependencies
 
 ```bash
 cd ${SUPERSET_RELEASE_RC}
-python3 -m venv venv
+uv venv venv
 source venv/bin/activate
 pip install -r requirements/base.txt
 pip install build twine

@@ -25,35 +25,26 @@
 const COLOR_KEYWORDS = require('./colors');
 
 function hasHexColor(quasi) {
-  if (typeof quasi === 'string') {
-    const regex = /#([a-f0-9]{3}|[a-f0-9]{4}(?:[a-f0-9]{2}){0,2})\b/gi;
-    return !!quasi.match(regex);
-  }
-  return false;
+  const regex = /#([a-f0-9]{3}|[a-f0-9]{4}(?:[a-f0-9]{2}){0,2})\b/gi;
+  return !!quasi.match(regex);
 }
 
 function hasRgbColor(quasi) {
-  if (typeof quasi === 'string') {
-    const regex = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+(?:\.\d+)?))?\)/i;
-    return !!quasi.match(regex);
-  }
-  return false;
+  const regex = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+(?:\.\d+)?))?\)/i;
+  return !!quasi.match(regex);
 }
 
 function hasLiteralColor(quasi, strict = false) {
-  if (typeof quasi === 'string') {
-    // matches literal colors at the start or end of a CSS prop
-    return COLOR_KEYWORDS.some(color => {
-      const regexColon = new RegExp(`: ${color}`);
-      const regexSemicolon = new RegExp(` ${color};`);
-      return (
-        !!quasi.match(regexColon) ||
-        !!quasi.match(regexSemicolon) ||
-        (strict && quasi === color)
-      );
-    });
-  }
-  return false;
+  // matches literal colors at the start or end of a CSS prop
+  return COLOR_KEYWORDS.some(color => {
+    const regexColon = new RegExp(`: ${color}`);
+    const regexSemicolon = new RegExp(` ${color};`);
+    return (
+      !!quasi.match(regexColon) ||
+      !!quasi.match(regexSemicolon) ||
+      (strict && quasi === color)
+    );
+  });
 }
 
 const WARNING_MESSAGE =
@@ -67,6 +58,14 @@ const WARNING_MESSAGE =
 module.exports = {
   rules: {
     'no-literal-colors': {
+      meta: {
+        type: 'suggestion',
+        docs: {
+          description:
+            'Disallow literal color values; use theme colors instead',
+        },
+        schema: [],
+      },
       create(context) {
         const warned = [];
         return {
@@ -80,7 +79,7 @@ module.exports = {
               node?.parent?.type === 'TemplateLiteral';
             const loc = node?.parent?.parent?.loc;
             const locId = loc && JSON.stringify(loc);
-            const hasWarned = warned.includes(locId);
+            const hasWarned = locId ? warned.includes(locId) : false;
             if (
               !hasWarned &&
               (isChildParentTagged ||
@@ -90,26 +89,42 @@ module.exports = {
                 hasHexColor(rawValue) ||
                 hasRgbColor(rawValue))
             ) {
-              context.report(node, loc, WARNING_MESSAGE);
-              warned.push(locId);
+              context.report({
+                node,
+                ...(loc && { loc }),
+                message: WARNING_MESSAGE,
+              });
+              if (locId) {
+                warned.push(locId);
+              }
             }
           },
           Literal(node) {
             const value = node?.value;
-            const isParentProperty = node?.parent?.type === 'Property';
-            const locId = JSON.stringify(node.loc);
-            const hasWarned = warned.includes(locId);
+            if (typeof value !== 'string') {
+              return;
+            }
+            const parent = node?.parent;
+            const isPropertyValue =
+              parent?.type === 'Property' && parent.value === node;
+            const locId = node?.loc ? JSON.stringify(node.loc) : null;
+            const hasWarned = locId ? warned.includes(locId) : false;
 
             if (
               !hasWarned &&
-              isParentProperty &&
-              value &&
+              isPropertyValue &&
               (hasLiteralColor(value, true) ||
                 hasHexColor(value) ||
                 hasRgbColor(value))
             ) {
-              context.report(node, node.loc, WARNING_MESSAGE);
-              warned.push(locId);
+              context.report({
+                node,
+                ...(node.loc && { loc: node.loc }),
+                message: WARNING_MESSAGE,
+              });
+              if (locId) {
+                warned.push(locId);
+              }
             }
           },
         };

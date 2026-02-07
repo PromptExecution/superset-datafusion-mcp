@@ -113,24 +113,29 @@ def generate_preview_from_form_data(
         query_result = result["queries"][0]
         data = query_result.get("data", [])
 
-        # Generate preview based on format
-        if preview_format == "ascii":
-            return _generate_ascii_preview_from_data(data, form_data)
-        elif preview_format == "table":
-            return _generate_table_preview_from_data(data, form_data)
-        elif preview_format == "vega_lite":
-            return _generate_vega_lite_preview_from_data(data, form_data)
-        else:
-            return ChartError(
-                error=f"Unsupported preview format: {preview_format}",
-                error_type="UnsupportedFormat",
-            )
+        return generate_preview_from_data(data, form_data, preview_format)
 
     except Exception as e:
         logger.error("Preview generation from form data failed: %s", e)
         return ChartError(
             error=f"Failed to generate preview: {str(e)}", error_type="PreviewError"
         )
+
+
+def generate_preview_from_data(
+    data: List[Dict[str, Any]], form_data: Dict[str, Any], preview_format: str
+) -> Any:
+    """Generate a preview payload from already queried chart data."""
+    if preview_format == "ascii":
+        return _generate_ascii_preview_from_data(data, form_data)
+    if preview_format == "table":
+        return _generate_table_preview_from_data(data, form_data)
+    if preview_format == "vega_lite":
+        return _generate_vega_lite_preview_from_data(data, form_data)
+    return ChartError(
+        error=f"Unsupported preview format: {preview_format}",
+        error_type="UnsupportedFormat",
+    )
 
 
 def _generate_ascii_preview_from_data(

@@ -88,6 +88,7 @@ import { HandlebarsChartPlugin } from '@superset-ui/plugin-chart-handlebars';
 import { ChartCustomizationPlugins, FilterPlugins } from 'src/constants';
 import AgGridTableChartPlugin from '@superset-ui/plugin-chart-ag-grid-table';
 import TimeTableChartPlugin from '../TimeTable';
+import KrokiChartPlugin from '../Kroki';
 
 export default class MainPreset extends Preset {
   constructor() {
@@ -195,6 +196,7 @@ export default class MainPreset extends Preset {
         new EchartsTreeChartPlugin().configure({ key: VizType.Tree }),
         new EchartsSunburstChartPlugin().configure({ key: VizType.Sunburst }),
         new HandlebarsChartPlugin().configure({ key: VizType.Handlebars }),
+        new KrokiChartPlugin().configure({ key: VizType.Kroki }),
         new EchartsBubbleChartPlugin().configure({ key: VizType.Bubble }),
         new CartodiagramPlugin({
           defaultLayers: [

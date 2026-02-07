@@ -28,13 +28,14 @@ import logging
 from fastmcp import Context
 from superset_core.mcp import tool
 
+from superset.mcp_service.dataframe.identifiers import normalize_virtual_dataset_id
 from superset.mcp_service.dataframe.registry import get_registry
 from superset.mcp_service.dataframe.schemas import (
     RemoveVirtualDatasetRequest,
     RemoveVirtualDatasetResponse,
 )
+from superset.mcp_service.dataframe.tool.context import resolve_session_and_user
 from superset.mcp_service.utils.schema_utils import parse_request
-from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ async def remove_virtual_dataset(
     immediately reclaim resources.
 
     Args:
-        dataset_id: The virtual dataset ID to remove
+        dataset_id: The virtual dataset ID to remove (raw UUID or virtual:{uuid})
 
     Returns:
         Success status and message.
@@ -61,12 +62,8 @@ async def remove_virtual_dataset(
 
     try:
         registry = get_registry()
-        try:
-            user_id = get_user_id()
-        except Exception:
-            user_id = None
-
-        session_id = getattr(ctx, "session_id", None)
+        normalized_dataset_id = normalize_virtual_dataset_id(request.dataset_id)
+        session_id, user_id = resolve_session_and_user(ctx)
         if session_id is None:
             if user_id is None:
                 message = (
@@ -78,10 +75,11 @@ async def remove_virtual_dataset(
                     success=False,
                     message=message,
                 )
-            session_id = f"user_{user_id}"
         # Check if dataset exists
         dataset = registry.get(
-            request.dataset_id, session_id=session_id, user_id=user_id
+            normalized_dataset_id,
+            session_id=session_id,
+            user_id=user_id,
         )
         if dataset is None:
             return RemoveVirtualDatasetResponse(
@@ -94,7 +92,9 @@ async def remove_virtual_dataset(
 
         # Remove the dataset
         removed = registry.remove(
-            request.dataset_id, session_id=session_id, user_id=user_id
+            normalized_dataset_id,
+            session_id=session_id,
+            user_id=user_id,
         )
 
         if removed:

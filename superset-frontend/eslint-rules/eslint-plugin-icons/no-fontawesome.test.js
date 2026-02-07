@@ -28,7 +28,9 @@ const plugin = require('.');
 //------------------------------------------------------------------------------
 // Tests
 //------------------------------------------------------------------------------
-const ruleTester = new RuleTester({ parserOptions: { ecmaVersion: 6 } });
+const ruleTester = new RuleTester({
+  parserOptions: { ecmaVersion: 6, ecmaFeatures: { jsx: true } },
+});
 const rule = plugin.rules['no-fa-icons-usage'];
 
 const errors = [

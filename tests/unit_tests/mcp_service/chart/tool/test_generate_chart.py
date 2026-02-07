@@ -174,6 +174,12 @@ class TestGenerateChart:
                     chart_type="table", columns=[ColumnRef(name="col1")]
                 ),
             ),
+            GenerateChartRequest(
+                dataset_id="virtual:abc123",
+                config=TableChartConfig(
+                    chart_type="table", columns=[ColumnRef(name="col1")]
+                ),
+            ),
         ]
 
         for config in configs:

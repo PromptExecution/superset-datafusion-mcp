@@ -47,12 +47,20 @@ module.exports = {
               node.openingElement &&
               node.openingElement.name.name === 'i' &&
               node.openingElement.attributes &&
-              node.openingElement.attributes.some(
-                attr =>
-                  attr.name &&
-                  attr.name.name === 'className' &&
-                  /fa fa-/.test(attr.value.value),
-              )
+              node.openingElement.attributes.some(attr => {
+                if (attr.name?.name !== 'className') {
+                  return false;
+                }
+                // className="fa fa-home"
+                if (attr.value?.type === 'Literal') {
+                  return /fa fa-/.test(attr.value.value ?? '');
+                }
+                // className={'fa fa-home'}
+                if (attr.value?.type === 'JSXExpressionContainer') {
+                  return /fa fa-/.test(attr.value.expression?.value ?? '');
+                }
+                return false;
+              })
             ) {
               context.report({
                 node,
