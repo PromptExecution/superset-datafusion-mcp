@@ -139,7 +139,6 @@ def test_ingest_dataframe_response_success() -> None:
             columns=[],
         ),
         dataset_id="abc123",
-        virtual_dataset_id="virtual:abc123",
         usage_hint="Use 'virtual:abc123' with generate_chart",
     )
     assert response.success is True

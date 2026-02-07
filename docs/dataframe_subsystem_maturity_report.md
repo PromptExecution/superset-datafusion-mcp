@@ -304,7 +304,7 @@ The existing MCP service (`superset/mcp_service/`) provides:
 Objective: Create an in-memory registry for DataFrame-based datasets.
 
 ```python
-# Proposed: superset/mcp_service/dataframe/registry.py
+# Current: superset/mcp_service/dataframe/registry.py
 from dataclasses import dataclass
 from typing import Dict, List
 import pyarrow as pa
@@ -348,7 +348,7 @@ Key features:
 Objective: Create MCP tools for DataFrame ingestion.
 
 ```python
-# Proposed: superset/mcp_service/dataframe/tool/ingest_dataframe.py
+# Current: superset/mcp_service/dataframe/tool/ingest_dataframe.py
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import base64

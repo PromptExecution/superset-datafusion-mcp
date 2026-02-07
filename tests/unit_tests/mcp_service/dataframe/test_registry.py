@@ -199,6 +199,10 @@ def test_registry_list_datasets(
     # Listing without session_id or user_id should raise ValueError (security)
     with pytest.raises(ValueError, match="At least one of session_id or user_id"):
         registry.list_datasets()
+        
+    # List all datasets
+    all_datasets = registry.list_datasets()
+    assert len(all_datasets) == 3
 
     # List datasets for session-1
     session1_datasets = registry.list_datasets(session_id="session-1")
