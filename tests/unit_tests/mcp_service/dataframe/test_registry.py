@@ -123,8 +123,8 @@ def test_registry_register_and_get(
 
     assert dataset_id is not None
 
-    # Retrieve the dataset
-    dataset = registry.get(dataset_id)
+    # Retrieve the dataset with session_id for access control
+    dataset = registry.get(dataset_id, session_id="session-1")
     assert dataset is not None
     assert dataset.name == "test_dataset"
     assert dataset.row_count == 5
@@ -140,15 +140,15 @@ def test_registry_remove(
         session_id="session-1",
     )
 
-    # Remove the dataset
-    removed = registry.remove(dataset_id)
+    # Remove the dataset with session_id for access control
+    removed = registry.remove(dataset_id, session_id="session-1")
     assert removed is True
 
     # Verify it's gone
-    assert registry.get(dataset_id) is None
+    assert registry.get(dataset_id, session_id="session-1") is None
 
     # Try to remove non-existent dataset
-    removed_again = registry.remove(dataset_id)
+    removed_again = registry.remove(dataset_id, session_id="session-1")
     assert removed_again is False
 
 
@@ -222,7 +222,7 @@ def test_registry_cleanup_expired(
     )
 
     # Should still exist
-    assert registry.get(dataset_id) is not None
+    assert registry.get(dataset_id, session_id="session-1") is not None
 
     # Manually expire the dataset by modifying its created_at
     dataset = registry._datasets[dataset_id]
@@ -234,7 +234,7 @@ def test_registry_cleanup_expired(
     assert removed == 1
 
     # Should be gone
-    assert registry.get(dataset_id) is None
+    assert registry.get(dataset_id, session_id="session-1") is None
 
 
 def test_registry_cleanup_session(
@@ -297,3 +297,123 @@ def test_registry_total_size_and_count(
 
     assert registry.total_count == 2
     assert registry.total_size_bytes > 0
+
+
+def test_registry_get_requires_credentials(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that get() requires session_id or user_id for access control."""
+    dataset_id = registry.register(
+        name="test_dataset",
+        table=sample_table,
+        session_id="session-1",
+    )
+
+    # Should fail when neither session_id nor user_id is provided
+    dataset = registry.get(dataset_id)
+    assert dataset is None
+
+    # Should succeed with session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
+
+    # Should succeed with user_id (even though it doesn't match)
+    # Note: will fail access check, but not the credential check
+    dataset_with_user = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-2",
+        user_id=123,
+    )
+    dataset = registry.get(dataset_with_user, user_id=123)
+    assert dataset is None  # Different session, no cross-session allowed
+
+    # Should succeed with matching user_id and cross-session enabled
+    dataset_cross = registry.register(
+        name="cross_dataset",
+        table=sample_table,
+        session_id="session-3",
+        user_id=456,
+        allow_cross_session=True,
+    )
+    dataset = registry.get(dataset_cross, user_id=456)
+    assert dataset is not None
+
+
+def test_registry_remove_requires_credentials(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that remove() requires session_id or user_id for access control."""
+    dataset_id = registry.register(
+        name="test_dataset",
+        table=sample_table,
+        session_id="session-1",
+    )
+
+    # Should fail when neither session_id nor user_id is provided
+    removed = registry.remove(dataset_id)
+    assert removed is False
+
+    # Dataset should still exist
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
+
+    # Should succeed with correct session_id
+    removed = registry.remove(dataset_id, session_id="session-1")
+    assert removed is True
+
+    # Dataset should be gone
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is None
+
+
+def test_registry_access_control_with_user_id(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test access control with user_id and cross-session access."""
+    # Register dataset with user_id and cross-session enabled
+    dataset_id = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-1",
+        user_id=123,
+        allow_cross_session=True,
+    )
+
+    # Should succeed with matching user_id from different session
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=123)
+    assert dataset is not None
+
+    # Should fail with different user_id
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=999)
+    assert dataset is None
+
+    # Should succeed with original session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
+
+    # Should be able to remove with matching user_id
+    removed = registry.remove(dataset_id, session_id="session-2", user_id=123)
+    assert removed is True
+
+
+def test_registry_access_control_without_cross_session(
+    registry: VirtualDatasetRegistry, sample_table: pa.Table
+) -> None:
+    """Test that cross-session access is denied by default."""
+    # Register dataset with user_id but without cross-session
+    dataset_id = registry.register(
+        name="user_dataset",
+        table=sample_table,
+        session_id="session-1",
+        user_id=123,
+        allow_cross_session=False,
+    )
+
+    # Should fail with matching user_id from different session
+    dataset = registry.get(dataset_id, session_id="session-2", user_id=123)
+    assert dataset is None
+
+    # Should succeed with original session_id
+    dataset = registry.get(dataset_id, session_id="session-1")
+    assert dataset is not None
