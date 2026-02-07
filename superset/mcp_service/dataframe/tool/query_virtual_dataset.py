@@ -152,6 +152,13 @@ async def query_virtual_dataset(
         if "LIMIT" not in sql_upper:
             sql = f"{sql} LIMIT {request.limit}"
 
+        # Remove a trailing semicolon so the query can be safely wrapped
+        if sql.endswith(";"):
+            sql = sql[:-1].rstrip()
+
+        # Always enforce an outer LIMIT to cap the result size
+        sql = f"SELECT * FROM ({sql}) AS subq"
+
         await ctx.debug("Executing SQL: %s" % sql[:200])
 
         try:
