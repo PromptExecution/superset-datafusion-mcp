@@ -128,6 +128,8 @@ class ValidationPipeline:
     @staticmethod
     def validate_request(
         request_data: Dict[str, Any],
+        session_id: str | None = None,
+        user_id: int | None = None,
     ) -> Tuple[bool, GenerateChartRequest | None, ChartGenerationError | None]:
         """
         Validate a chart generation request through all validation layers.
@@ -140,12 +142,18 @@ class ValidationPipeline:
 
         Note: Use validate_request_with_warnings() to also get runtime warnings.
         """
-        result = ValidationPipeline.validate_request_with_warnings(request_data)
+        result = ValidationPipeline.validate_request_with_warnings(
+            request_data,
+            session_id=session_id,
+            user_id=user_id,
+        )
         return result.is_valid, result.request, result.error
 
     @staticmethod
     def validate_request_with_warnings(
         request_data: Dict[str, Any],
+        session_id: str | None = None,
+        user_id: int | None = None,
     ) -> ValidationResult:
         """
         Validate a chart generation request and return warnings as metadata.
@@ -170,7 +178,10 @@ class ValidationPipeline:
 
             # Layer 2: Dataset validation
             is_valid, error = ValidationPipeline._validate_dataset(
-                request.config, request.dataset_id
+                request.config,
+                request.dataset_id,
+                session_id=session_id,
+                user_id=user_id,
             )
             if not is_valid:
                 return ValidationResult(is_valid=False, request=request, error=error)
@@ -203,13 +214,21 @@ class ValidationPipeline:
 
     @staticmethod
     def _validate_dataset(
-        config: ChartConfig, dataset_id: int | str
+        config: ChartConfig,
+        dataset_id: int | str,
+        session_id: str | None = None,
+        user_id: int | None = None,
     ) -> Tuple[bool, ChartGenerationError | None]:
         """Validate configuration against dataset schema."""
         try:
             from .dataset_validator import DatasetValidator
 
-            return DatasetValidator.validate_against_dataset(config, dataset_id)
+            return DatasetValidator.validate_against_dataset(
+                config,
+                dataset_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
         except ImportError:
             # Skip if dataset validator not available
             logger.warning(

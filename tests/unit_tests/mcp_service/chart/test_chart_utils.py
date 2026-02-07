@@ -495,6 +495,11 @@ class TestGenerateExploreLink:
             == "http://localhost:9001/explore/?datasource_type=table&datasource_id=123"
         )
 
+    def test_generate_explore_link_virtual_dataset(self) -> None:
+        """Virtual datasets do not produce Explore URLs."""
+        result = generate_explore_link("virtual:abc123", {"viz_type": "table"})
+        assert result == ""
+
 
 class TestCriticalBugFixes:
     """Test critical bug fixes for chart utilities."""

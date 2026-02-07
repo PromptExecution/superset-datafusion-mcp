@@ -22,13 +22,17 @@ Validates that referenced columns exist in the dataset schema.
 
 import difflib
 import logging
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
+
+import pyarrow as pa
 
 from superset.mcp_service.chart.schemas import (
     ColumnRef,
     TableChartConfig,
     XYChartConfig,
 )
+from superset.mcp_service.dataframe.identifiers import extract_virtual_dataset_id
+from superset.mcp_service.dataframe.registry import get_registry
 from superset.mcp_service.common.error_schemas import (
     ChartGenerationError,
     ColumnSuggestion,
@@ -43,7 +47,10 @@ class DatasetValidator:
 
     @staticmethod
     def validate_against_dataset(
-        config: TableChartConfig | XYChartConfig, dataset_id: int | str
+        config: TableChartConfig | XYChartConfig,
+        dataset_id: int | str,
+        session_id: str | None = None,
+        user_id: int | None = None,
     ) -> Tuple[bool, ChartGenerationError | None]:
         """
         Validate chart configuration against dataset schema.
@@ -56,7 +63,11 @@ class DatasetValidator:
             Tuple of (is_valid, error)
         """
         # Get dataset context
-        dataset_context = DatasetValidator._get_dataset_context(dataset_id)
+        dataset_context = DatasetValidator._get_dataset_context(
+            dataset_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
         if not dataset_context:
             from superset.mcp_service.utils.error_builder import (
                 ChartErrorBuilder,
@@ -98,9 +109,20 @@ class DatasetValidator:
         return True, None
 
     @staticmethod
-    def _get_dataset_context(dataset_id: int | str) -> DatasetContext | None:
+    def _get_dataset_context(
+        dataset_id: int | str,
+        session_id: str | None = None,
+        user_id: int | None = None,
+    ) -> DatasetContext | None:
         """Get dataset context with column information."""
         try:
+            if virtual_dataset_context := DatasetValidator._get_virtual_dataset_context(
+                dataset_id=dataset_id,
+                session_id=session_id,
+                user_id=user_id,
+            ):
+                return virtual_dataset_context
+
             from superset.daos.dataset import DatasetDAO
 
             # Find dataset
@@ -158,6 +180,52 @@ class DatasetValidator:
         except Exception as e:
             logger.error("Error getting dataset context for %s: %s", dataset_id, e)
             return None
+
+    @staticmethod
+    def _get_virtual_dataset_context(
+        dataset_id: int | str,
+        session_id: str | None,
+        user_id: int | None,
+    ) -> DatasetContext | None:
+        """Build dataset context for prefixed virtual datasets."""
+        raw_dataset_id = extract_virtual_dataset_id(dataset_id)
+        if raw_dataset_id is None:
+            return None
+
+        registry = get_registry()
+        dataset = registry.get(
+            raw_dataset_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if dataset is None:
+            return None
+
+        available_columns: list[dict[str, Any]] = []
+        for field in dataset.schema:
+            is_temporal = pa.types.is_temporal(field.type)
+            is_numeric = (
+                pa.types.is_integer(field.type)
+                or pa.types.is_floating(field.type)
+                or pa.types.is_decimal(field.type)
+            )
+            available_columns.append(
+                {
+                    "name": field.name,
+                    "type": str(field.type),
+                    "is_temporal": is_temporal,
+                    "is_numeric": is_numeric,
+                }
+            )
+
+        return DatasetContext(
+            id=dataset.id,
+            table_name=dataset.name,
+            schema="virtual",
+            database_name="virtual_arrow",
+            available_columns=available_columns,
+            available_metrics=[],
+        )
 
     @staticmethod
     def _extract_column_references(

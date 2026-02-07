@@ -38,6 +38,14 @@ from superset.mcp_service.chart.schemas import (
     GenerateChartResponse,
     PerformanceMetadata,
 )
+from superset.mcp_service.chart.virtual_dataset_bridge import (
+    query_virtual_dataset_with_form_data,
+    resolve_virtual_dataset,
+)
+from superset.mcp_service.dataframe.identifiers import (
+    is_virtual_dataset_identifier,
+)
+from superset.mcp_service.dataframe.tool.context import resolve_session_and_user
 from superset.mcp_service.utils.schema_utils import parse_request
 from superset.mcp_service.utils.url_utils import get_superset_base_url
 from superset.utils import json
@@ -125,6 +133,9 @@ async def generate_chart(  # noqa: C901
 
     # Track runtime warnings to include in response
     runtime_warnings: list[str] = []
+    session_id, user_id = resolve_session_and_user(ctx)
+    is_virtual_dataset = is_virtual_dataset_identifier(request.dataset_id)
+    virtual_dataset = None
 
     try:
         # Run comprehensive validation pipeline
@@ -135,12 +146,15 @@ async def generate_chart(  # noqa: C901
         from superset.mcp_service.chart.validation import ValidationPipeline
 
         validation_result = ValidationPipeline.validate_request_with_warnings(
-            request.model_dump()
+            request.model_dump(),
+            session_id=session_id,
+            user_id=user_id,
         )
 
         if validation_result.is_valid and validation_result.request is not None:
             # Use the validated request going forward
             request = validation_result.request
+            is_virtual_dataset = is_virtual_dataset_identifier(request.dataset_id)
 
         # Capture runtime warnings (informational, not blocking)
         if validation_result.warnings:
@@ -184,8 +198,85 @@ async def generate_chart(  # noqa: C901
         explore_url = None
         form_data_key = None
 
+        if is_virtual_dataset:
+            virtual_dataset = resolve_virtual_dataset(
+                request.dataset_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            if virtual_dataset is None:
+                execution_time = int((time.time() - start_time) * 1000)
+                from superset.mcp_service.common.error_schemas import (
+                    ChartGenerationError,
+                )
+
+                error = ChartGenerationError(
+                    error_type="dataset_not_found",
+                    message=f"Virtual dataset not found: {request.dataset_id}",
+                    details=(
+                        f"No accessible virtual dataset found for identifier "
+                        f"'{request.dataset_id}'."
+                    ),
+                    suggestions=[
+                        "Use list_virtual_datasets to see accessible virtual datasets",
+                        "Check dataset TTL and recreate it if expired",
+                        "Use the prefixed format virtual:{uuid}",
+                    ],
+                    error_code="VIRTUAL_DATASET_NOT_FOUND",
+                )
+                return GenerateChartResponse.model_validate(
+                    {
+                        "chart": None,
+                        "error": error.model_dump(),
+                        "performance": {
+                            "query_duration_ms": execution_time,
+                            "cache_status": "error",
+                            "optimization_suggestions": [],
+                        },
+                        "success": False,
+                        "schema_version": "2.0",
+                        "api_version": "v1",
+                    }
+                )
+
         # Save chart by default (unless save_chart=False)
         if request.save_chart:
+            if is_virtual_dataset:
+                execution_time = int((time.time() - start_time) * 1000)
+                from superset.mcp_service.common.error_schemas import (
+                    ChartGenerationError,
+                )
+
+                error = ChartGenerationError(
+                    error_type="unsupported_operation",
+                    message=(
+                        "Saving charts from virtual datasets is not supported"
+                    ),
+                    details=(
+                        "Virtual datasets are in-memory and session-scoped. "
+                        "Use save_chart=False to generate previews."
+                    ),
+                    suggestions=[
+                        "Set save_chart=False and generate_preview=True",
+                        "Persist data to a Superset dataset before saving chart",
+                    ],
+                    error_code="VIRTUAL_DATASET_SAVE_UNSUPPORTED",
+                )
+                return GenerateChartResponse.model_validate(
+                    {
+                        "chart": None,
+                        "error": error.model_dump(),
+                        "performance": {
+                            "query_duration_ms": execution_time,
+                            "cache_status": "error",
+                            "optimization_suggestions": [],
+                        },
+                        "success": False,
+                        "schema_version": "2.0",
+                        "api_version": "v1",
+                    }
+                )
+
             await ctx.report_progress(2, 5, "Creating chart in database")
             from superset.commands.chart.create import CreateChartCommand
 
@@ -337,19 +428,25 @@ async def generate_chart(  # noqa: C901
                 # form_data_key remains None but chart is still valid
         else:
             await ctx.report_progress(2, 5, "Generating temporary chart preview")
-            # Generate explore link with cached form_data for preview-only mode
-            from superset.mcp_service.chart.chart_utils import generate_explore_link
+            if is_virtual_dataset:
+                runtime_warnings.append(
+                    "Explore URLs are unavailable for virtual datasets. "
+                    "Use preview payloads instead."
+                )
+            else:
+                # Generate explore link with cached form_data for preview-only mode
+                from superset.mcp_service.chart.chart_utils import generate_explore_link
 
-            explore_url = generate_explore_link(request.dataset_id, form_data)
-            await ctx.debug("Generated explore link: explore_url=%s" % (explore_url,))
+                explore_url = generate_explore_link(request.dataset_id, form_data)
+                await ctx.debug("Generated explore link: explore_url=%s" % (explore_url,))
 
-            # Extract form_data_key from the explore URL using proper URL parsing
-            if explore_url:
-                parsed = urlparse(explore_url)
-                query_params = parse_qs(parsed.query)
-                form_data_key_list = query_params.get("form_data_key", [])
-                if form_data_key_list:
-                    form_data_key = form_data_key_list[0]
+                # Extract form_data_key from the explore URL using proper URL parsing
+                if explore_url:
+                    parsed = urlparse(explore_url)
+                    query_params = parse_qs(parsed.query)
+                    form_data_key_list = query_params.get("form_data_key", [])
+                    if form_data_key_list:
+                        form_data_key = form_data_key_list[0]
 
         # Generate semantic analysis
         capabilities = analyze_chart_capabilities(chart, request.config)
@@ -383,60 +480,101 @@ async def generate_chart(  # noqa: C901
                 "Generating previews: formats=%s" % (str(request.preview_formats),)
             )
             try:
-                for format_type in request.preview_formats:
-                    await ctx.debug(
-                        "Processing preview format: format=%s" % (format_type,)
+                if is_virtual_dataset and not chart_id:
+                    if virtual_dataset is None:
+                        raise RuntimeError(
+                            "Virtual dataset missing during preview generation"
+                        )
+
+                    from superset.mcp_service.chart.preview_utils import (
+                        generate_preview_from_data,
                     )
 
-                    if chart_id:
-                        # For saved charts, use the existing preview generation
-                        from superset.mcp_service.chart.tool.get_chart_preview import (
-                            _get_chart_preview_internal,
-                            GetChartPreviewRequest,
+                    if "url" in request.preview_formats:
+                        runtime_warnings.append(
+                            "URL previews are unavailable for virtual datasets."
                         )
 
-                        preview_request = GetChartPreviewRequest(
-                            identifier=str(chart_id), format=format_type
-                        )
-                        preview_result = await _get_chart_preview_internal(
-                            preview_request, ctx
+                    preview_formats = [
+                        format_type
+                        for format_type in request.preview_formats
+                        if format_type in {"ascii", "table", "vega_lite"}
+                    ]
+                    if not preview_formats:
+                        preview_formats = ["table"]
+                        runtime_warnings.append(
+                            "URL previews are unavailable for virtual datasets; "
+                            "returned a table preview instead."
                         )
 
-                        if hasattr(preview_result, "content"):
-                            previews[format_type] = preview_result.content
-                    else:
-                        # For preview-only mode (save_chart=false)
-                        # Note: Screenshot-based URL previews are not supported.
-                        # Use the explore_url to view the chart interactively.
-                        if format_type in ["ascii", "table", "vega_lite"]:
-                            # Generate preview from form data without saved chart
-                            from superset.mcp_service.chart.preview_utils import (
-                                generate_preview_from_form_data,
+                    preview_rows, _ = query_virtual_dataset_with_form_data(
+                        virtual_dataset,
+                        form_data=form_data,
+                        limit=1000,
+                    )
+                    for format_type in preview_formats:
+                        preview_result = generate_preview_from_data(
+                            data=preview_rows,
+                            form_data=form_data,
+                            preview_format=format_type,
+                        )
+                        if not hasattr(preview_result, "error"):
+                            previews[format_type] = preview_result
+                else:
+                    for format_type in request.preview_formats:
+                        await ctx.debug(
+                            "Processing preview format: format=%s" % (format_type,)
+                        )
+
+                        if chart_id:
+                            # For saved charts, use the existing preview generation
+                            from superset.mcp_service.chart.tool.get_chart_preview import (
+                                _get_chart_preview_internal,
+                                GetChartPreviewRequest,
                             )
 
-                            # Convert dataset_id to int only if it's numeric
-                            if (
-                                isinstance(request.dataset_id, str)
-                                and request.dataset_id.isdigit()
-                            ):
-                                dataset_id_for_preview = int(request.dataset_id)
-                            elif isinstance(request.dataset_id, int):
-                                dataset_id_for_preview = request.dataset_id
-                            else:
-                                # Skip preview generation for non-numeric dataset IDs
-                                logger.warning(
-                                    "Cannot generate preview for non-numeric "
+                            preview_request = GetChartPreviewRequest(
+                                identifier=str(chart_id), format=format_type
+                            )
+                            preview_result = await _get_chart_preview_internal(
+                                preview_request, ctx
+                            )
+
+                            if hasattr(preview_result, "content"):
+                                previews[format_type] = preview_result.content
+                        else:
+                            # For preview-only mode (save_chart=false)
+                            # Note: Screenshot-based URL previews are not supported.
+                            # Use the explore_url to view the chart interactively.
+                            if format_type in ["ascii", "table", "vega_lite"]:
+                                # Generate preview from form data without saved chart
+                                from superset.mcp_service.chart.preview_utils import (
+                                    generate_preview_from_form_data,
                                 )
-                                continue
 
-                            preview_result = generate_preview_from_form_data(
-                                form_data=form_data,
-                                dataset_id=dataset_id_for_preview,
-                                preview_format=format_type,
-                            )
+                                # Convert dataset_id to int only if it's numeric
+                                if (
+                                    isinstance(request.dataset_id, str)
+                                    and request.dataset_id.isdigit()
+                                ):
+                                    dataset_id_for_preview = int(request.dataset_id)
+                                elif isinstance(request.dataset_id, int):
+                                    dataset_id_for_preview = request.dataset_id
+                                else:
+                                    # Skip preview generation for non-numeric dataset IDs
+                                    logger.warning(
+                                        "Cannot generate preview for non-numeric "
+                                    )
+                                    continue
 
-                            if not hasattr(preview_result, "error"):
-                                previews[format_type] = preview_result
+                                preview_result = generate_preview_from_form_data(
+                                    form_data=form_data,
+                                    dataset_id=dataset_id_for_preview,
+                                    preview_format=format_type,
+                                )
+
+                                if not hasattr(preview_result, "error"):
+                                    previews[format_type] = preview_result
 
             except Exception as e:
                 # Log warning but don't fail the entire request

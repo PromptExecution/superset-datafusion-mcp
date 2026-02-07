@@ -58,12 +58,21 @@ Dataset Management:
 - list_datasets: List datasets with advanced filters (1-based pagination)
 - get_dataset_info: Get detailed dataset information by ID (includes columns/metrics)
 
+DataFrame Virtual Dataset Management:
+- ingest_dataframe: Ingest Arrow IPC DataFrame payloads as virtual datasets
+- list_source_capabilities: List dataframe source capabilities and pushdown support
+- list_virtual_datasets: List accessible in-memory virtual datasets
+- query_virtual_dataset: Run read-only SQL against a virtual dataset
+- query_prometheus: Query Prometheus metrics and ingest as virtual dataset
+- query_datafusion: Query Parquet/Arrow/virtual sources using DataFusion SQL
+- remove_virtual_dataset: Delete a virtual dataset and release memory
+
 Chart Management:
 - list_charts: List charts with advanced filters (1-based pagination)
 - get_chart_info: Get detailed chart information by ID
 - get_chart_preview: Get a visual preview of a chart with image URL
 - get_chart_data: Get underlying chart data in text-friendly format
-- generate_chart: Create and save a new chart permanently
+- generate_chart: Create chart previews; optionally save as a permanent chart
 - generate_explore_link: Create an interactive explore URL (preferred for exploration)
 - update_chart: Update existing saved chart configuration
 - update_chart_preview: Update cached chart preview without saving
@@ -94,6 +103,18 @@ To create a chart:
 2. get_dataset_info(id) -> examine columns and metrics
 3. generate_explore_link(dataset_id, config) -> preview interactively
 4. generate_chart(dataset_id, config, save_chart=True) -> save permanently
+
+To visualize a DataFrame without creating a database table:
+1. ingest_dataframe(name, data, ttl_minutes) -> create virtual dataset
+2. list_virtual_datasets -> confirm dataset and copy id
+3. query_virtual_dataset(dataset_id, sql) -> inspect transformed results
+4. generate_chart(dataset_id="virtual:...", save_chart=False) -> preview table/ascii/vega outputs
+
+To bring in external metric/file sources:
+1. list_source_capabilities -> choose a source path based on connector capabilities
+2. query_prometheus(base_url, promql, query_type) -> flatten metric series
+3. query_datafusion(sql, sources) -> query parquet/arrow inputs
+4. set ingest_as_virtual_dataset/ingest_result=true for cross-tool reuse
 
 To explore data with SQL:
 1. get_instance_info -> find database_id
@@ -325,6 +346,15 @@ from superset.mcp_service.dashboard.tool import (  # noqa: F401, E402
 from superset.mcp_service.dataset.tool import (  # noqa: F401, E402
     get_dataset_info,
     list_datasets,
+)
+from superset.mcp_service.dataframe.tool import (  # noqa: F401, E402
+    ingest_dataframe,
+    list_source_capabilities,
+    list_virtual_datasets,
+    query_datafusion,
+    query_prometheus,
+    query_virtual_dataset,
+    remove_virtual_dataset,
 )
 from superset.mcp_service.explore.tool import (  # noqa: F401, E402
     generate_explore_link,

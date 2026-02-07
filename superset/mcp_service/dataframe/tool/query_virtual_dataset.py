@@ -24,37 +24,26 @@ Allows executing SQL queries against virtual datasets using DuckDB.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastmcp import Context
 from superset_core.mcp import tool
 
+from superset.mcp_service.dataframe.identifiers import normalize_virtual_dataset_id
 from superset.mcp_service.dataframe.registry import get_registry
 from superset.mcp_service.dataframe.schemas import (
     QueryVirtualDatasetRequest,
     QueryVirtualDatasetResponse,
 )
+from superset.mcp_service.dataframe.tool.common import (
+    normalize_sql,
+    table_to_columns,
+    table_to_rows,
+    validate_read_only_sql,
+)
+from superset.mcp_service.dataframe.tool.context import resolve_session_and_user
 from superset.mcp_service.utils.schema_utils import parse_request
-from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
-
-
-def _convert_value(value: Any) -> str | int | float | bool | None:
-    """Convert a value to a JSON-serializable type."""
-    if value is None:
-        return None
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    # Handle numpy types and other types
-    try:
-        # Try to convert to float first (handles numpy numeric types)
-        return float(value)
-    except (TypeError, ValueError):
-        pass
-    # Fall back to string conversion
-    return str(value)
-
 
 @tool(tags=["dataframe"])
 @parse_request(QueryVirtualDatasetRequest)
@@ -73,7 +62,7 @@ async def query_virtual_dataset(
     - SELECT date, sales FROM data WHERE sales > 100 ORDER BY date
 
     Args:
-        dataset_id: The virtual dataset ID (without 'virtual:' prefix)
+        dataset_id: The virtual dataset ID (raw UUID or virtual:{uuid})
         sql: SQL query to execute
         limit: Maximum rows to return (default 1000)
 
@@ -90,32 +79,25 @@ async def query_virtual_dataset(
         registry = get_registry()
 
         # Determine session and user context
-        session_id = getattr(ctx, "session_id", None)
-        try:
-            user_id = get_user_id()
-        except Exception:
-            user_id = None
+        session_id, user_id = resolve_session_and_user(ctx)
 
-        # Avoid falling back to a shared default session identifier
         if not session_id:
-            if user_id is not None:
-                # Derive a per-user session identifier to prevent collisions
-                session_id = f"user_session_{user_id}"
-            else:
-                logger.warning(
-                    "Missing session_id and user_id; refusing to query virtual dataset "
-                    "for dataset_id=%s",
-                    request.dataset_id,
-                )
-                return QueryVirtualDatasetResponse(
-                    success=False,
-                    error=(
-                        "Cannot query virtual dataset: missing session and user "
-                        "context. Please retry after re-authenticating."
-                    ),
-                )
+            logger.warning(
+                "Missing session_id and user_id; refusing to query virtual dataset "
+                "for dataset_id=%s",
+                request.dataset_id,
+            )
+            return QueryVirtualDatasetResponse(
+                success=False,
+                error=(
+                    "Cannot query virtual dataset: missing session and user "
+                    "context. Please retry after re-authenticating."
+                ),
+            )
         dataset = registry.get(
-            request.dataset_id, session_id=session_id, user_id=user_id
+            normalize_virtual_dataset_id(request.dataset_id),
+            session_id=session_id,
+            user_id=user_id,
         )
 
         if dataset is None:
@@ -140,24 +122,17 @@ async def query_virtual_dataset(
                 ),
             )
 
+        validation_error = validate_read_only_sql(request.sql)
+        if validation_error:
+            return QueryVirtualDatasetResponse(success=False, error=validation_error)
+
+        # Always enforce an outer LIMIT to cap the result size.
+        normalized_sql = normalize_sql(request.sql)
+        sql = f"SELECT * FROM ({normalized_sql}) AS subq LIMIT {request.limit}"
+
         # Create DuckDB connection and register the table
         conn = duckdb.connect()
         conn.register("data", dataset.table)
-
-        # Execute query with limit
-        sql = request.sql.strip()
-
-        # Add LIMIT if not present (safety measure)
-        sql_upper = sql.upper()
-        if "LIMIT" not in sql_upper:
-            sql = f"{sql} LIMIT {request.limit}"
-
-        # Remove a trailing semicolon so the query can be safely wrapped
-        if sql.endswith(";"):
-            sql = sql[:-1].rstrip()
-
-        # Always enforce an outer LIMIT to cap the result size
-        sql = f"SELECT * FROM ({sql}) AS subq"
 
         await ctx.debug("Executing SQL: %s" % sql[:200])
 
@@ -174,12 +149,8 @@ async def query_virtual_dataset(
             conn.close()
 
         # Convert to response format
-        df = result_table.to_pandas()
-        rows = []
-        for _, row in df.iterrows():
-            rows.append({col: _convert_value(row[col]) for col in df.columns})
-
-        columns = [{"name": col, "type": str(df[col].dtype)} for col in df.columns]
+        rows = table_to_rows(result_table)
+        columns = table_to_columns(result_table)
 
         await ctx.info(
             "Query completed: rows=%d, columns=%d" % (len(rows), len(columns))

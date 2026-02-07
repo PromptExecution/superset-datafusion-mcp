@@ -34,7 +34,7 @@ from superset.mcp_service.dataframe.schemas import (
     ListVirtualDatasetsResponse,
     VirtualDatasetInfo,
 )
-from superset.utils.core import get_user_id
+from superset.mcp_service.dataframe.tool.context import resolve_session_and_user
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +58,18 @@ async def list_virtual_datasets(ctx: Context) -> ListVirtualDatasetsResponse:
     await ctx.info("Listing virtual datasets")
 
     try:
-        # Get session ID from context
-        session_id = getattr(ctx, "session_id", None) or "default_session"
-        try:
-            user_id = get_user_id()
-        except Exception:
-            user_id = None
+        session_id, user_id = resolve_session_and_user(ctx)
+        if not session_id and user_id is None:
+            message = (
+                "Missing session and user context; cannot safely list "
+                "virtual datasets"
+            )
+            await ctx.error(message)
+            return ListVirtualDatasetsResponse(
+                datasets=[],
+                total_count=0,
+                total_size_mb=0.0,
+            )
 
         # Get registry and list datasets
         registry = get_registry()

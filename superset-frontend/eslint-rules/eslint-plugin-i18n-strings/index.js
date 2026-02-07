@@ -30,19 +30,26 @@
 module.exports = {
   rules: {
     'no-template-vars': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description: 'Disallow variables in translation template strings',
+        },
+        schema: [],
+      },
       create(context) {
         function handler(node) {
-          if (node.arguments.length) {
-            const firstArgs = node.arguments[0];
+          for (const arg of node.arguments ?? []) {
             if (
-              firstArgs.type === 'TemplateLiteral' &&
-              firstArgs.expressions.length
+              arg.type === 'TemplateLiteral' &&
+              (arg.expressions?.length ?? 0) > 0
             ) {
               context.report({
                 node,
                 message:
                   "Don't use variables in translation string templates. Flask-babel is a static translation service, so it can't handle strings that include variables",
               });
+              break;
             }
           }
         }
@@ -53,6 +60,13 @@ module.exports = {
       },
     },
     'sentence-case-buttons': {
+      meta: {
+        type: 'suggestion',
+        docs: {
+          description: 'Enforce sentence case for button text in translations',
+        },
+        schema: [],
+      },
       create(context) {
         function isTitleCase(str) {
           // Match "Delete Dataset", "Create Chart", etc. (2+ title-cased words)
@@ -60,12 +74,12 @@ module.exports = {
         }
 
         function isButtonContext(node) {
-          const { parent } = node;
+          const parent = node.parent;
           if (!parent) return false;
 
           // Check for button-specific props
           if (parent.type === 'Property') {
-            const key = parent.key.name;
+            const key = parent.key?.name;
             return [
               'primaryButtonName',
               'secondaryButtonName',
@@ -75,10 +89,10 @@ module.exports = {
           }
 
           // Check for Button components
-          if (parent.type === 'JSXExpressionContainer') {
+          if (String(parent.type) === 'JSXExpressionContainer') {
             const jsx = parent.parent;
-            if (jsx?.type === 'JSXElement') {
-              const elementName = jsx.openingElement.name.name;
+            if (String(jsx?.type) === 'JSXElement') {
+              const elementName = jsx?.openingElement?.name?.name;
               return elementName === 'Button';
             }
           }
@@ -87,23 +101,20 @@ module.exports = {
         }
 
         function handler(node) {
-          if (node.arguments.length) {
-            const firstArg = node.arguments[0];
-            if (
-              firstArg.type === 'Literal' &&
-              typeof firstArg.value === 'string'
-            ) {
-              const text = firstArg.value;
+          for (const arg of node.arguments ?? []) {
+            if (arg.type !== 'Literal' || typeof arg.value !== 'string') {
+              continue;
+            }
+            const text = arg.value;
 
-              if (isButtonContext(node) && isTitleCase(text)) {
-                const sentenceCase = text
-                  .toLowerCase()
-                  .replace(/^\w/, c => c.toUpperCase());
-                context.report({
-                  node: firstArg,
-                  message: `Button text should use sentence case: "${text}" should be "${sentenceCase}"`,
-                });
-              }
+            if (isButtonContext(node) && isTitleCase(text)) {
+              const sentenceCase = text
+                .toLowerCase()
+                .replace(/^\w/, c => c.toUpperCase());
+              context.report({
+                node: arg,
+                message: `Button text should use sentence case: "${text}" should be "${sentenceCase}"`,
+              });
             }
           }
         }

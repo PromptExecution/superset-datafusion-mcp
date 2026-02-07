@@ -35,6 +35,7 @@ from superset.mcp_service.chart.chart_utils import (
 from superset.mcp_service.chart.schemas import (
     GenerateExploreLinkRequest,
 )
+from superset.mcp_service.dataframe.identifiers import is_virtual_dataset_identifier
 from superset.mcp_service.utils.schema_utils import parse_request
 
 
@@ -114,6 +115,20 @@ async def generate_explore_link(
         await ctx.report_progress(2, 3, "Generating explore URL")
         # Generate explore link using shared utilities
         explore_url = generate_url(dataset_id=request.dataset_id, form_data=form_data)
+
+        if is_virtual_dataset_identifier(request.dataset_id):
+            message = (
+                "Explore links are unavailable for virtual datasets. "
+                "Use generate_chart with preview formats "
+                "['table', 'ascii', 'vega_lite']."
+            )
+            await ctx.warning(message)
+            return {
+                "url": "",
+                "form_data": form_data,
+                "form_data_key": None,
+                "error": message,
+            }
 
         # Extract form_data_key from the explore URL using proper URL parsing
         form_data_key = None

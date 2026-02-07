@@ -21,7 +21,7 @@ set -e
 # Wait for PostgreSQL to be ready
 echo "Waiting for database to be ready..."
 for i in {1..30}; do
-  if python3 -c "
+  if uv run python -c "
 import psycopg2
 try:
     conn = psycopg2.connect(host='db-light', user='superset', password='superset', database='superset_light')
@@ -45,7 +45,7 @@ done
 if [ "${FORCE_RELOAD}" = "true" ]; then
   echo "Force reload requested - resetting test database"
   # Drop and recreate the test database using Python
-  python3 -c "
+  uv run python -c "
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
@@ -82,7 +82,7 @@ else
   FLAGS="--no-reset-db"
 
   # Ensure test database exists using Python
-  python3 -c "
+  uv run python -c "
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 

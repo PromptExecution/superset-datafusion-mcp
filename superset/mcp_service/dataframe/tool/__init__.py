@@ -22,9 +22,14 @@ Provides MCP tools for DataFrame ingestion and virtual dataset management.
 """
 
 from superset.mcp_service.dataframe.tool.ingest_dataframe import ingest_dataframe
+from superset.mcp_service.dataframe.tool.list_source_capabilities import (
+    list_source_capabilities,
+)
 from superset.mcp_service.dataframe.tool.list_virtual_datasets import (
     list_virtual_datasets,
 )
+from superset.mcp_service.dataframe.tool.query_datafusion import query_datafusion
+from superset.mcp_service.dataframe.tool.query_prometheus import query_prometheus
 from superset.mcp_service.dataframe.tool.query_virtual_dataset import (
     query_virtual_dataset,
 )
@@ -34,7 +39,10 @@ from superset.mcp_service.dataframe.tool.remove_virtual_dataset import (
 
 __all__ = [
     "ingest_dataframe",
+    "list_source_capabilities",
     "list_virtual_datasets",
+    "query_datafusion",
+    "query_prometheus",
     "query_virtual_dataset",
     "remove_virtual_dataset",
 ]

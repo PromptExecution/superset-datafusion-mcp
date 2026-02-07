@@ -30,8 +30,16 @@ from superset.mcp_service.dataframe.registry import (
 )
 from superset.mcp_service.dataframe.schemas import (
     ColumnSchema,
+    DataFrameSourceCapability,
+    DataFusionQueryRequest,
+    DataFusionQueryResponse,
+    DataFusionSourceConfig,
     IngestDataFrameRequest,
     IngestDataFrameResponse,
+    ListSourceCapabilitiesRequest,
+    ListSourceCapabilitiesResponse,
+    PrometheusQueryRequest,
+    PrometheusQueryResponse,
     VirtualDatasetInfo,
 )
 
@@ -42,5 +50,13 @@ __all__ = [
     "ColumnSchema",
     "IngestDataFrameRequest",
     "IngestDataFrameResponse",
+    "ListSourceCapabilitiesRequest",
+    "ListSourceCapabilitiesResponse",
+    "PrometheusQueryRequest",
+    "PrometheusQueryResponse",
     "VirtualDatasetInfo",
+    "DataFrameSourceCapability",
+    "DataFusionSourceConfig",
+    "DataFusionQueryRequest",
+    "DataFusionQueryResponse",
 ]
