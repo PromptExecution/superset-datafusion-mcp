@@ -39,7 +39,7 @@ Apache Superset has **mature Arrow/PyArrow support** at its core data layer thro
 | PyArrow Integration | ✅ Mature | Core result handling uses `pa.Table` |
 | Pandas DataFrame Processing | ✅ Mature | Rich postprocessing pipeline |
 | Arrow IPC Serialization | ✅ Supported | Used for SQL Lab result caching |
-| External DataFrame Ingestion | ⚠️ Limited | Only via CSV/Excel upload or SQL |
+| External DataFrame Ingestion | ✅ Implemented | Via MCP tools: ingest_dataframe, query_virtual_dataset |
 | MCP Service | ✅ Mature | Full-featured MCP implementation |
 | DataFrame-to-Dashboard Pipeline | ❌ Not Implemented | Requires new tooling |
 
@@ -309,12 +309,12 @@ The existing MCP service (`superset/mcp_service/`) provides:
 
 ### 5.2 Implementation Plan
 
-#### Phase 1: Virtual Dataset Registry (Week 1-2)
+#### Phase 1: Virtual Dataset Registry ✅ Implemented
 
-**Objective**: Create an in-memory registry for DataFrame-based datasets.
+**Status**: Implemented in `superset/mcp_service/dataframe/registry.py`
 
 ```python
-# Proposed: superset/mcp_service/dataframe/registry.py
+# Implemented: superset/mcp_service/dataframe/registry.py
 from dataclasses import dataclass
 from typing import Dict, List
 import pyarrow as pa
@@ -352,12 +352,16 @@ class VirtualDatasetRegistry:
 - Optional persistence for sharing across sessions
 - DuckDB integration for SQL queries against Arrow tables
 
-#### Phase 2: DataFrame Ingestion MCP Tool (Week 2-3)
+#### Phase 2: DataFrame Ingestion MCP Tool ✅ Implemented
 
-**Objective**: Create MCP tools for DataFrame ingestion.
+**Status**: Implemented in `superset/mcp_service/dataframe/tool/` with multiple tools:
+- `ingest_dataframe.py` - Upload DataFrame data as virtual datasets
+- `list_virtual_datasets.py` - List all registered virtual datasets
+- `query_virtual_dataset.py` - Query virtual datasets using SQL
+- `remove_virtual_dataset.py` - Remove virtual datasets from registry
 
 ```python
-# Proposed: superset/mcp_service/dataframe/tool/ingest_dataframe.py
+# Implemented: superset/mcp_service/dataframe/tool/ingest_dataframe.py
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import base64
