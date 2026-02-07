@@ -61,12 +61,24 @@ async def remove_virtual_dataset(
 
     try:
         registry = get_registry()
-        session_id = getattr(ctx, "session_id", None) or "default_session"
         try:
             user_id = get_user_id()
         except Exception:
             user_id = None
 
+        session_id = getattr(ctx, "session_id", None)
+        if session_id is None:
+            if user_id is None:
+                message = (
+                    "Missing session and user context; cannot safely remove "
+                    f"virtual dataset '{request.dataset_id}'"
+                )
+                await ctx.error(message)
+                return RemoveVirtualDatasetResponse(
+                    success=False,
+                    message=message,
+                )
+            session_id = f"user_{user_id}"
         # Check if dataset exists
         dataset = registry.get(
             request.dataset_id, session_id=session_id, user_id=user_id
