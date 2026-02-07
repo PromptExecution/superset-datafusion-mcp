@@ -146,13 +146,26 @@ async def ingest_dataframe(
             % (table.num_rows, table.num_columns)
         )
 
-        # Get session ID from context
-        session_id = getattr(ctx, "session_id", None) or "default_session"
+        # Get user and session IDs
         try:
             user_id = get_user_id()
         except Exception:
             user_id = None
 
+        session_id = getattr(ctx, "session_id", None)
+        if not session_id:
+            if user_id is not None:
+                # Derive a per-user fallback session ID to avoid cross-user collisions
+                session_id = f"user_{user_id}"
+            else:
+                logger.error(
+                    "Missing both session_id and user_id; refusing to ingest DataFrame"
+                )
+                return IngestDataFrameResponse(
+                    success=False,
+                    error="Missing session and user context; cannot safely ingest DataFrame",
+                    error_code="MISSING_SESSION_CONTEXT",
+                )
         # Calculate TTL
         ttl = (
             timedelta(minutes=request.ttl_minutes) if request.ttl_minutes > 0 else None
