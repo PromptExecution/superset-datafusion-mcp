@@ -292,11 +292,15 @@ class VirtualDatasetRegistry:
 
         Args:
             dataset_id: The unique dataset ID
-            session_id: Optional session ID for access validation
-            user_id: Optional user ID for access validation
+            session_id: Session ID for access validation (required unless user_id provided)
+            user_id: User ID for access validation (required unless session_id provided)
 
         Returns:
             The VirtualDataset if found and not expired, None otherwise
+
+        Note:
+            For security, at least one of session_id or user_id must be provided.
+            If neither is provided, access is denied and None is returned.
         """
         with self._lock:
             dataset = self._datasets.get(dataset_id)
@@ -310,14 +314,21 @@ class VirtualDatasetRegistry:
                 logger.info("Virtual dataset expired: id=%s", dataset_id)
                 return None
 
-            if session_id or user_id is not None:
-                if not self._has_access(dataset, session_id, user_id):
-                    logger.warning(
-                        "Virtual dataset access denied: id=%s, session=%s",
-                        dataset_id,
-                        session_id,
-                    )
-                    return None
+            # Require at least one of session_id or user_id for access control
+            if not session_id and user_id is None:
+                logger.warning(
+                    "Virtual dataset access denied (no credentials): id=%s",
+                    dataset_id,
+                )
+                return None
+
+            if not self._has_access(dataset, session_id, user_id):
+                logger.warning(
+                    "Virtual dataset access denied: id=%s, session=%s",
+                    dataset_id,
+                    session_id,
+                )
+                return None
 
             dataset.last_accessed_at = datetime.now(timezone.utc)
             return dataset
@@ -333,24 +344,37 @@ class VirtualDatasetRegistry:
 
         Args:
             dataset_id: The unique dataset ID
-            session_id: Optional session ID for access validation
-            user_id: Optional user ID for access validation
+            session_id: Session ID for access validation (required unless user_id provided)
+            user_id: User ID for access validation (required unless session_id provided)
 
         Returns:
-            True if the dataset was removed, False if not found
+            True if the dataset was removed, False if not found or access denied
+
+        Note:
+            For security, at least one of session_id or user_id must be provided.
+            If neither is provided, access is denied and False is returned.
         """
         with self._lock:
             dataset = self._datasets.get(dataset_id)
             if dataset is None:
                 return False
-            if session_id or user_id is not None:
-                if not self._has_access(dataset, session_id, user_id):
-                    logger.warning(
-                        "Virtual dataset removal denied: id=%s, session=%s",
-                        dataset_id,
-                        session_id,
-                    )
-                    return False
+
+            # Require at least one of session_id or user_id for access control
+            if not session_id and user_id is None:
+                logger.warning(
+                    "Virtual dataset removal denied (no credentials): id=%s",
+                    dataset_id,
+                )
+                return False
+
+            if not self._has_access(dataset, session_id, user_id):
+                logger.warning(
+                    "Virtual dataset removal denied: id=%s, session=%s",
+                    dataset_id,
+                    session_id,
+                )
+                return False
+
             del self._datasets[dataset_id]
             logger.info("Virtual dataset removed: id=%s", dataset_id)
             return True
