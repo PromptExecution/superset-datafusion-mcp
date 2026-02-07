@@ -168,7 +168,9 @@ async def ingest_dataframe(
                 )
         # Calculate TTL
         ttl = (
-            timedelta(minutes=request.ttl_minutes) if request.ttl_minutes > 0 else None
+            timedelta(minutes=request.ttl_minutes)
+            if request.ttl_minutes > 0
+            else timedelta(seconds=0)
         )
 
         # Register with the virtual dataset registry
