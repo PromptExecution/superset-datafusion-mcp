@@ -359,26 +359,34 @@ class VirtualDatasetRegistry:
         self, session_id: str | None = None, user_id: int | None = None
     ) -> list[dict[str, str | int | datetime | None]]:
         """
-        List all virtual datasets, optionally filtered by session.
+        List virtual datasets filtered by session or user access.
+
+        At least one of session_id or user_id must be provided to prevent
+        exposing cross-session metadata. Access is controlled by _has_access().
 
         Args:
-            session_id: Optional session ID to filter by
-            user_id: Optional user ID to filter by
+            session_id: Session ID to filter by (recommended)
+            user_id: User ID to filter by
 
         Returns:
             List of dataset metadata dictionaries
+
+        Raises:
+            ValueError: If both session_id and user_id are None
         """
+        # Security check: require at least one identifier
+        if session_id is None and user_id is None:
+            raise ValueError(
+                "At least one of session_id or user_id must be provided to list datasets"
+            )
+
         # Clean up expired datasets first
         self.cleanup_expired()
 
         with self._lock:
             datasets: list[dict[str, str | int | datetime | None]] = []
             for dataset in self._datasets.values():
-                if session_id is None and user_id is None:
-                    include_dataset = True
-                else:
-                    include_dataset = self._has_access(dataset, session_id, user_id)
-                if include_dataset:
+                if self._has_access(dataset, session_id, user_id):
                     datasets.append(
                         {
                             "id": dataset.id,

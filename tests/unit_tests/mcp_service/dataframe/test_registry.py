@@ -196,9 +196,9 @@ def test_registry_list_datasets(
     registry.register(name="ds2", table=sample_table, session_id="session-1")
     registry.register(name="ds3", table=sample_table, session_id="session-2")
 
-    # List all datasets
-    all_datasets = registry.list_datasets()
-    assert len(all_datasets) == 3
+    # Listing without session_id or user_id should raise ValueError (security)
+    with pytest.raises(ValueError, match="At least one of session_id or user_id"):
+        registry.list_datasets()
 
     # List datasets for session-1
     session1_datasets = registry.list_datasets(session_id="session-1")
@@ -251,7 +251,7 @@ def test_registry_cleanup_session(
     assert removed == 2
 
     # Verify only session-2 remains
-    all_datasets = registry.list_datasets()
+    all_datasets = registry.list_datasets(session_id="session-2")
     assert len(all_datasets) == 1
     assert all_datasets[0]["name"] == "ds3"
 
