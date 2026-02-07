@@ -39,6 +39,7 @@ from superset.mcp_service.dataframe.schemas import (
     VirtualDatasetInfo,
 )
 from superset.mcp_service.utils.schema_utils import parse_request
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,19 @@ async def ingest_dataframe(
     )
 
     try:
+        registry = get_registry()
+
+        estimated_bytes = (len(request.data) * 3) // 4
+        if estimated_bytes > registry.max_size_bytes:
+            return IngestDataFrameResponse(
+                success=False,
+                error=(
+                    "Dataset payload exceeds size limit "
+                    f"({registry.max_size_bytes / 1024 / 1024:.2f} MB)"
+                ),
+                error_code="PAYLOAD_TOO_LARGE",
+            )
+
         # Decode base64 data
         try:
             raw_data = base64.b64decode(request.data)
@@ -134,6 +148,10 @@ async def ingest_dataframe(
 
         # Get session ID from context
         session_id = getattr(ctx, "session_id", None) or "default_session"
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
 
         # Calculate TTL
         ttl = (
@@ -141,13 +159,14 @@ async def ingest_dataframe(
         )
 
         # Register with the virtual dataset registry
-        registry = get_registry()
         try:
             dataset_id = registry.register(
                 name=request.name,
                 table=table,
                 session_id=session_id,
+                user_id=user_id,
                 ttl=ttl,
+                allow_cross_session=request.allow_cross_session,
             )
         except ValueError as e:
             logger.error("Failed to register virtual dataset: %s", e)
@@ -158,7 +177,7 @@ async def ingest_dataframe(
             )
 
         # Retrieve the registered dataset for response
-        dataset = registry.get(dataset_id)
+        dataset = registry.get(dataset_id, session_id=session_id, user_id=user_id)
         if dataset is None:
             return IngestDataFrameResponse(
                 success=False,

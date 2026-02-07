@@ -35,6 +35,7 @@ from superset.mcp_service.dataframe.schemas import (
     QueryVirtualDatasetResponse,
 )
 from superset.mcp_service.utils.schema_utils import parse_request
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +88,22 @@ async def query_virtual_dataset(
     try:
         # Get the virtual dataset
         registry = get_registry()
-        dataset = registry.get(request.dataset_id)
+        session_id = getattr(ctx, "session_id", None) or "default_session"
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
+        dataset = registry.get(
+            request.dataset_id, session_id=session_id, user_id=user_id
+        )
 
         if dataset is None:
             return QueryVirtualDatasetResponse(
                 success=False,
-                error=f"Virtual dataset '{request.dataset_id}' not found or expired",
+                error=(
+                    f"Virtual dataset '{request.dataset_id}' not found, expired, "
+                    "or access denied"
+                ),
             )
 
         # Try to use DuckDB for SQL execution
