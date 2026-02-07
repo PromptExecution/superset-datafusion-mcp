@@ -1945,6 +1945,38 @@ SLACK_CACHE_TIMEOUT = int(timedelta(days=1).total_seconds())
 # For workspaces with 10k+ channels, consider increasing to 10
 SLACK_API_RATE_LIMIT_RETRY_COUNT = 2
 
+# Kroki sidecar integration for SVG diagram rendering.
+KROKI_BASE_URL = "http://localhost:8000"
+KROKI_REQUEST_TIMEOUT = 10
+KROKI_MAX_SOURCE_LENGTH = 200000
+KROKI_ALLOWED_DIAGRAM_TYPES = (
+    "actdiag",
+    "blockdiag",
+    "bpmn",
+    "bytefield",
+    "c4plantuml",
+    "d2",
+    "dbml",
+    "ditaa",
+    "erd",
+    "excalidraw",
+    "graphviz",
+    "mermaid",
+    "nomnoml",
+    "nwdiag",
+    "packetdiag",
+    "pikchr",
+    "plantuml",
+    "rackdiag",
+    "seqdiag",
+    "structurizr",
+    "svgbob",
+    "umlet",
+    "vega",
+    "vegalite",
+    "wavedrom",
+)
+
 # The webdriver to use for generating reports. Use one of the following
 # firefox
 #   Requires: geckodriver and firefox installations

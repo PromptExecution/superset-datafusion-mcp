@@ -16,13 +16,17 @@
 # under the License.
 from __future__ import annotations
 
+import logging
 from typing import Any, TYPE_CHECKING
+from urllib.parse import urljoin
 
-from flask import request
+import requests
+from flask import current_app, request
 from flask_appbuilder import expose
 from flask_appbuilder.api import rison
 from flask_appbuilder.security.decorators import has_access_api
 from flask_babel import lazy_gettext as _
+from requests import RequestException
 
 from superset import db, event_logger
 from superset.commands.chart.exceptions import (
@@ -34,11 +38,14 @@ from superset.models.slice import Slice
 from superset.superset_typing import FlaskResponse
 from superset.utils import json
 from superset.utils.date_parser import get_since_until
+from superset.utils.core import sanitize_svg_content
 from superset.views.base import api, BaseSupersetView
 from superset.views.error_handling import handle_api_exception
 
 if TYPE_CHECKING:
     from superset.common.query_context_factory import QueryContextFactory
+
+logger = logging.getLogger(__name__)
 
 get_time_range_schema = {
     "type": ["string", "array"],
@@ -125,6 +132,117 @@ class Api(BaseSupersetView):
         except (ValueError, TimeRangeParseFailError, TimeRangeAmbiguousError) as error:
             error_msg = {"message": _("Unexpected time range: %(error)s", error=error)}
             return self.json_response(error_msg, 400)
+
+    @event_logger.log_this
+    @api
+    @handle_api_exception
+    @has_access_api
+    @expose("/v1/kroki/render/", methods=("POST",))
+    def kroki_render(self) -> FlaskResponse:
+        """
+        Render a diagram via a Kroki sidecar and return SVG only.
+        """
+        payload = request.get_json(silent=True) or {}
+
+        diagram_type = str(payload.get("diagram_type", "")).strip().lower()
+        diagram_source = payload.get("diagram_source")
+        output_format = str(payload.get("output_format", "svg")).strip().lower()
+
+        if output_format != "svg":
+            return self.json_response(
+                {"message": _("Kroki output_format must be svg.")},
+                400,
+            )
+
+        if not diagram_type:
+            return self.json_response(
+                {"message": _("Missing required field: diagram_type.")},
+                400,
+            )
+
+        if not isinstance(diagram_source, str) or not diagram_source.strip():
+            return self.json_response(
+                {"message": _("Missing required field: diagram_source.")},
+                400,
+            )
+
+        max_source_length = int(current_app.config.get("KROKI_MAX_SOURCE_LENGTH", 0))
+        if max_source_length > 0 and len(diagram_source) > max_source_length:
+            return self.json_response(
+                {
+                    "message": _(
+                        "diagram_source exceeds max length of %(length)s characters.",
+                        length=max_source_length,
+                    )
+                },
+                400,
+            )
+
+        allowed_diagram_types = {
+            diagram.lower()
+            for diagram in current_app.config.get("KROKI_ALLOWED_DIAGRAM_TYPES", [])
+            if isinstance(diagram, str) and diagram.strip()
+        }
+        if allowed_diagram_types and diagram_type not in allowed_diagram_types:
+            return self.json_response(
+                {
+                    "message": _(
+                        "Unsupported diagram_type: %(diagram_type)s",
+                        diagram_type=diagram_type,
+                    )
+                },
+                400,
+            )
+
+        kroki_base_url = str(current_app.config.get("KROKI_BASE_URL", "")).strip()
+        if not kroki_base_url:
+            return self.json_response(
+                {"message": _("KROKI_BASE_URL is not configured.")},
+                500,
+            )
+
+        kroki_timeout = int(current_app.config.get("KROKI_REQUEST_TIMEOUT", 10))
+        kroki_url = urljoin(kroki_base_url.rstrip("/") + "/", f"{diagram_type}/svg")
+
+        try:
+            response = requests.post(
+                kroki_url,
+                data=diagram_source.encode("utf-8"),
+                headers={
+                    "Accept": "image/svg+xml",
+                    "Content-Type": "text/plain; charset=utf-8",
+                },
+                timeout=kroki_timeout,
+            )
+        except RequestException as ex:
+            logger.warning("Kroki sidecar request failed: %s", ex)
+            return self.json_response(
+                {"message": _("Failed to reach Kroki renderer.")},
+                502,
+            )
+
+        if response.status_code >= 400:
+            logger.warning(
+                "Kroki sidecar returned status %s for diagram_type=%s",
+                response.status_code,
+                diagram_type,
+            )
+            return self.json_response(
+                {"message": _("Kroki failed to render diagram.")},
+                502,
+            )
+
+        svg = sanitize_svg_content(response.text)
+        return self.json_response(
+            {
+                "result": {
+                    "diagram_type": diagram_type,
+                    "output_format": "svg",
+                    "svg": svg,
+                }
+            },
+            200,
+        )
 
     def get_query_context_factory(self) -> QueryContextFactory:
         if self.query_context_factory is None:
