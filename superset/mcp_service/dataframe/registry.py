@@ -63,8 +63,8 @@ class VirtualDataset:
     created_at: datetime
     ttl: timedelta
     owner_session: str
-    owner_user_id: int | None
-    allow_cross_session: bool
+    owner_user_id: int | None = None
+    allow_cross_session: bool = False
     row_count: int = field(init=False)
     size_bytes: int = field(init=False)
     last_accessed_at: datetime = field(init=False)
