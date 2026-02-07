@@ -25,25 +25,15 @@ version: 1
 
 # Apache Superset DataFrame Subsystem Maturity Report
 
-This document provides a comprehensive analysis of the DataFrame subsystem within Apache Superset, focusing on Apache Arrow support, current capabilities, limitations, and a roadmap for implementing a fast MCP (Model Context Protocol) interface using DataFrames to create dashboards.
+This page has moved. Please refer to the canonical version of this document in the Developer Portal:
 
-## Executive Summary
+- [DataFrame Subsystem Maturity Report](developer_portal/dataframe-subsystem-maturity-report.md)
 
-Apache Superset has mature Arrow/PyArrow support at its core data layer through the `SupersetResultSet` class, but the DataFrame subsystem is primarily designed for consumption and visualization rather than ingestion from external DataFrame sources. The current architecture uses pandas DataFrames as the internal interchange format, with PyArrow serving as an efficient serialization and type-handling layer.
+This stub is kept only to preserve existing links and avoid duplicated documentation content.
 
-## Key Findings
-
-| Capability | Maturity Level | Notes |
-| --- | --- | --- |
-| PyArrow Integration | ✅ Mature | Core result handling uses `pa.Table` |
-| Pandas DataFrame Processing | ✅ Mature | Rich postprocessing pipeline |
-| Arrow IPC Serialization | ✅ Supported | Used for SQL Lab result caching |
-| External DataFrame Ingestion | ⚠️ Limited | Only via CSV/Excel upload or SQL |
-| MCP Service | ✅ Mature | Full-featured MCP implementation |
-| DataFrame-to-Dashboard Pipeline | ❌ Not Implemented | Requires new tooling |
-
-## 1. Current Arrow/PyArrow Support Analysis
-
+<!-- The detailed content has been consolidated into the Developer Portal version
+     at docs/developer_portal/dataframe-subsystem-maturity-report.md to prevent
+     divergence and confusion. -->
 ### 1.1 Core Implementation: `SupersetResultSet`
 
 The `SupersetResultSet` class (located at `superset/result_set.py`) is the primary Arrow integration point in Superset:
