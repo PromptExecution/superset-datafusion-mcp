@@ -35,6 +35,7 @@ from superset.mcp_service.dataframe.schemas import (
     QueryVirtualDatasetResponse,
 )
 from superset.mcp_service.utils.schema_utils import parse_request
+from superset.utils.core import get_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +88,43 @@ async def query_virtual_dataset(
     try:
         # Get the virtual dataset
         registry = get_registry()
-        dataset = registry.get(request.dataset_id)
+
+        # Determine session and user context
+        session_id = getattr(ctx, "session_id", None)
+        try:
+            user_id = get_user_id()
+        except Exception:
+            user_id = None
+
+        # Avoid falling back to a shared default session identifier
+        if not session_id:
+            if user_id is not None:
+                # Derive a per-user session identifier to prevent collisions
+                session_id = f"user_session_{user_id}"
+            else:
+                logger.warning(
+                    "Missing session_id and user_id; refusing to query virtual dataset "
+                    "for dataset_id=%s",
+                    request.dataset_id,
+                )
+                return QueryVirtualDatasetResponse(
+                    success=False,
+                    error=(
+                        "Cannot query virtual dataset: missing session and user "
+                        "context. Please retry after re-authenticating."
+                    ),
+                )
+        dataset = registry.get(
+            request.dataset_id, session_id=session_id, user_id=user_id
+        )
 
         if dataset is None:
             return QueryVirtualDatasetResponse(
                 success=False,
-                error=f"Virtual dataset '{request.dataset_id}' not found or expired",
+                error=(
+                    f"Virtual dataset '{request.dataset_id}' not found, expired, "
+                    "or access denied"
+                ),
             )
 
         # Try to use DuckDB for SQL execution
@@ -114,11 +146,12 @@ async def query_virtual_dataset(
 
         # Execute query with limit
         sql = request.sql.strip()
+        # Remove a trailing semicolon so the query can be safely wrapped
+        if sql.endswith(";"):
+            sql = sql[:-1].rstrip()
 
-        # Add LIMIT if not present (safety measure)
-        sql_upper = sql.upper()
-        if "LIMIT" not in sql_upper:
-            sql = f"{sql} LIMIT {request.limit}"
+        # Always enforce an outer LIMIT to cap the result size
+        sql = f"SELECT * FROM ({sql}) AS subq LIMIT {request.limit}"
 
         await ctx.debug("Executing SQL: %s" % sql[:200])
 
@@ -136,9 +169,10 @@ async def query_virtual_dataset(
 
         # Convert to response format
         df = result_table.to_pandas()
-        rows = []
-        for _, row in df.iterrows():
-            rows.append({col: _convert_value(row[col]) for col in df.columns})
+        rows = df.to_dict("records")
+        for row in rows:
+            for col in row:
+                row[col] = _convert_value(row[col])
 
         columns = [{"name": col, "type": str(df[col].dtype)} for col in df.columns]
 

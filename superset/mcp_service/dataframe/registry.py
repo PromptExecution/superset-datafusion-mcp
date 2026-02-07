@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -62,8 +63,11 @@ class VirtualDataset:
     created_at: datetime
     ttl: timedelta
     owner_session: str
+    owner_user_id: int | None = None
+    allow_cross_session: bool = False
     row_count: int = field(init=False)
     size_bytes: int = field(init=False)
+    last_accessed_at: datetime = field(init=False)
 
     def __post_init__(self) -> None:
         """Calculate derived fields after initialization."""
@@ -72,6 +76,7 @@ class VirtualDataset:
         self.size_bytes = sum(
             buf.size for chunk in self.table.columns for buf in chunk.buffers() if buf
         )
+        self.last_accessed_at = self.created_at
 
     @property
     def is_expired(self) -> bool:
@@ -130,6 +135,9 @@ class VirtualDatasetRegistry:
         max_size_mb: int = 100,
         max_count: int = 10,
         default_ttl_minutes: int = 60,
+        max_total_size_mb: int = 500,
+        max_session_size_mb: int | None = None,
+        cleanup_interval_seconds: int = 300,
     ):
         """
         Initialize the virtual dataset registry.
@@ -144,13 +152,52 @@ class VirtualDatasetRegistry:
         self._max_size_bytes = max_size_mb * 1024 * 1024
         self._max_count = max_count
         self._default_ttl = timedelta(minutes=default_ttl_minutes)
+        self._max_total_size_bytes = max_total_size_mb * 1024 * 1024
+        if max_session_size_mb is None:
+            max_session_size_mb = max_total_size_mb
+        self._max_session_size_bytes = max_session_size_mb * 1024 * 1024
+        self._cleanup_interval_seconds = cleanup_interval_seconds
+        self._stop_event = threading.Event()
+        self._cleanup_thread: threading.Thread | None = None
+        self._start_cleanup_thread()
+
+    def _start_cleanup_thread(self) -> None:
+        """Start a background thread to clean up expired datasets."""
+        if self._cleanup_interval_seconds <= 0:
+            return
+        if self._cleanup_thread and self._cleanup_thread.is_alive():
+            return
+
+        def _cleanup_loop() -> None:
+            while not self._stop_event.wait(self._cleanup_interval_seconds):
+                try:
+                    removed = self.cleanup_expired()
+                    if removed:
+                        logger.info("TTL cleanup removed %d virtual datasets", removed)
+                except Exception as exc:
+                    logger.warning("TTL cleanup failed: %s", exc)
+
+        self._cleanup_thread = threading.Thread(
+            target=_cleanup_loop,
+            name="virtual-dataset-ttl-cleanup",
+            daemon=True,
+        )
+        self._cleanup_thread.start()
+
+    def shutdown(self) -> None:
+        """Stop the background cleanup thread."""
+        self._stop_event.set()
+        if self._cleanup_thread and self._cleanup_thread.is_alive():
+            self._cleanup_thread.join(timeout=1)
 
     def register(
         self,
         name: str,
         table: pa.Table,
         session_id: str,
+        user_id: int | None = None,
         ttl: timedelta | None = None,
+        allow_cross_session: bool = False,
     ) -> str:
         """
         Register a DataFrame as a virtual dataset.
@@ -170,10 +217,8 @@ class VirtualDatasetRegistry:
         # Clean up expired datasets first
         self.cleanup_expired()
 
+        size_bytes = self._calculate_table_size(table)
         # Validate size
-        size_bytes = sum(
-            buf.size for chunk in table.columns for buf in chunk.buffers() if buf
-        )
         if size_bytes > self._max_size_bytes:
             raise ValueError(
                 f"Dataset size ({size_bytes / 1024 / 1024:.2f} MB) exceeds "
@@ -181,6 +226,13 @@ class VirtualDatasetRegistry:
             )
 
         with self._lock:
+            total_size_bytes = sum(ds.size_bytes for ds in self._datasets.values())
+            if total_size_bytes + size_bytes > self._max_total_size_bytes:
+                raise ValueError(
+                    "Total virtual dataset size limit exceeded "
+                    f"({self._max_total_size_bytes / 1024 / 1024:.2f} MB)"
+                )
+
             # Check count limit for this session
             session_count = sum(
                 1 for ds in self._datasets.values() if ds.owner_session == session_id
@@ -188,6 +240,17 @@ class VirtualDatasetRegistry:
             if session_count >= self._max_count:
                 raise ValueError(
                     f"Session has reached maximum dataset count ({self._max_count})"
+                )
+
+            session_size_bytes = sum(
+                ds.size_bytes
+                for ds in self._datasets.values()
+                if ds.owner_session == session_id
+            )
+            if session_size_bytes + size_bytes > self._max_session_size_bytes:
+                raise ValueError(
+                    "Session virtual dataset size limit exceeded "
+                    f"({self._max_session_size_bytes / 1024 / 1024:.2f} MB)"
                 )
 
             # Generate unique ID
@@ -202,6 +265,8 @@ class VirtualDatasetRegistry:
                 created_at=datetime.now(timezone.utc),
                 ttl=ttl if ttl is not None else self._default_ttl,
                 owner_session=session_id,
+                owner_user_id=user_id,
+                allow_cross_session=allow_cross_session,
             )
 
             self._datasets[dataset_id] = dataset
@@ -216,12 +281,19 @@ class VirtualDatasetRegistry:
 
             return dataset_id
 
-    def get(self, dataset_id: str) -> VirtualDataset | None:
+    def get(
+        self,
+        dataset_id: str,
+        session_id: str | None = None,
+        user_id: int | None = None,
+    ) -> VirtualDataset | None:
         """
         Retrieve a virtual dataset by ID.
 
         Args:
             dataset_id: The unique dataset ID
+            session_id: Optional session ID for access validation
+            user_id: Optional user ID for access validation
 
         Returns:
             The VirtualDataset if found and not expired, None otherwise
@@ -238,33 +310,60 @@ class VirtualDatasetRegistry:
                 logger.info("Virtual dataset expired: id=%s", dataset_id)
                 return None
 
+            if session_id or user_id is not None:
+                if not self._has_access(dataset, session_id, user_id):
+                    logger.warning(
+                        "Virtual dataset access denied: id=%s, session=%s",
+                        dataset_id,
+                        session_id,
+                    )
+                    return None
+
+            dataset.last_accessed_at = datetime.now(timezone.utc)
             return dataset
 
-    def remove(self, dataset_id: str) -> bool:
+    def remove(
+        self,
+        dataset_id: str,
+        session_id: str | None = None,
+        user_id: int | None = None,
+    ) -> bool:
         """
         Remove a virtual dataset from the registry.
 
         Args:
             dataset_id: The unique dataset ID
+            session_id: Optional session ID for access validation
+            user_id: Optional user ID for access validation
 
         Returns:
             True if the dataset was removed, False if not found
         """
         with self._lock:
-            if dataset_id in self._datasets:
-                del self._datasets[dataset_id]
-                logger.info("Virtual dataset removed: id=%s", dataset_id)
-                return True
-            return False
+            dataset = self._datasets.get(dataset_id)
+            if dataset is None:
+                return False
+            if session_id or user_id is not None:
+                if not self._has_access(dataset, session_id, user_id):
+                    logger.warning(
+                        "Virtual dataset removal denied: id=%s, session=%s",
+                        dataset_id,
+                        session_id,
+                    )
+                    return False
+            del self._datasets[dataset_id]
+            logger.info("Virtual dataset removed: id=%s", dataset_id)
+            return True
 
     def list_datasets(
-        self, session_id: str | None = None
+        self, session_id: str | None = None, user_id: int | None = None
     ) -> list[dict[str, str | int | datetime | None]]:
         """
         List all virtual datasets, optionally filtered by session.
 
         Args:
             session_id: Optional session ID to filter by
+            user_id: Optional user ID to filter by
 
         Returns:
             List of dataset metadata dictionaries
@@ -275,7 +374,11 @@ class VirtualDatasetRegistry:
         with self._lock:
             datasets: list[dict[str, str | int | datetime | None]] = []
             for dataset in self._datasets.values():
-                if session_id is None or dataset.owner_session == session_id:
+                if session_id is None and user_id is None:
+                    include_dataset = True
+                else:
+                    include_dataset = self._has_access(dataset, session_id, user_id)
+                if include_dataset:
                     datasets.append(
                         {
                             "id": dataset.id,
@@ -344,48 +447,107 @@ class VirtualDatasetRegistry:
         with self._lock:
             return len(self._datasets)
 
+    @property
+    def max_size_bytes(self) -> int:
+        """Get the maximum allowed size for a single dataset."""
+        return self._max_size_bytes
+
+    @property
+    def max_total_size_bytes(self) -> int:
+        """Get the maximum allowed size for all datasets."""
+        return self._max_total_size_bytes
+
+    @property
+    def max_session_size_bytes(self) -> int:
+        """Get the maximum allowed size for a single session."""
+        return self._max_session_size_bytes
+
+    def _calculate_table_size(self, table: pa.Table) -> int:
+        """Estimate Arrow table size in bytes."""
+        return sum(
+            buf.size for chunk in table.columns for buf in chunk.buffers() if buf
+        )
+
+    def _has_access(
+        self,
+        dataset: VirtualDataset,
+        session_id: str | None,
+        user_id: int | None,
+    ) -> bool:
+        """Check whether a session/user can access the dataset."""
+        if session_id and dataset.owner_session == session_id:
+            return True
+        if (
+            dataset.allow_cross_session
+            and user_id is not None
+            and dataset.owner_user_id == user_id
+        ):
+            return True
+        return False
+
+
+def _build_registry_from_config() -> VirtualDatasetRegistry:
+    """
+    Build a registry using Flask configuration if available.
+
+    Returns:
+        A VirtualDatasetRegistry configured from Flask config or defaults.
+    """
+    max_size_mb = 100
+    max_count = 10
+    default_ttl_minutes = 60
+
+    try:
+        from flask import current_app
+
+        if current_app:
+            max_size_mb = current_app.config.get(
+                "MCP_VIRTUAL_DATASET_MAX_SIZE_MB", 100
+            )
+            max_count = current_app.config.get("MCP_VIRTUAL_DATASET_MAX_COUNT", 10)
+            default_ttl_minutes = current_app.config.get(
+                "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES", 60
+            )
+    except RuntimeError:
+        # Outside of Flask app context, use defaults.
+        pass
+
+    return VirtualDatasetRegistry(
+        max_size_mb=max_size_mb,
+        max_count=max_count,
+        default_ttl_minutes=default_ttl_minutes,
+    )
+
 
 def get_registry() -> VirtualDatasetRegistry:
     """
-    Get the global virtual dataset registry instance.
+    Get the virtual dataset registry instance.
 
     The registry is created lazily on first access using configuration
-    from the Flask app if available.
+    from the Flask app if available. When running inside Flask, the
+    registry is stored on the app instance.
 
     Returns:
-        The global VirtualDatasetRegistry instance
+        The VirtualDatasetRegistry instance
     """
     global _registry
 
     with _registry_lock:
+        try:
+            from flask import current_app
+
+            if current_app:
+                registry = current_app.extensions.get("mcp_virtual_dataset_registry")
+                if registry is None:
+                    registry = _build_registry_from_config()
+                    current_app.extensions["mcp_virtual_dataset_registry"] = registry
+                return registry
+        except RuntimeError:
+            # Outside of Flask app context, use the global singleton.
+            pass
+
         if _registry is None:
-            # Try to get configuration from Flask app
-            max_size_mb = 100
-            max_count = 10
-            default_ttl_minutes = 60
-
-            try:
-                from flask import current_app
-
-                if current_app:
-                    max_size_mb = current_app.config.get(
-                        "MCP_VIRTUAL_DATASET_MAX_SIZE_MB", 100
-                    )
-                    max_count = current_app.config.get(
-                        "MCP_VIRTUAL_DATASET_MAX_COUNT", 10
-                    )
-                    default_ttl_minutes = current_app.config.get(
-                        "MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES", 60
-                    )
-            except RuntimeError:
-                # Outside of Flask app context, use defaults
-                pass
-
-            _registry = VirtualDatasetRegistry(
-                max_size_mb=max_size_mb,
-                max_count=max_count,
-                default_ttl_minutes=default_ttl_minutes,
-            )
+            _registry = _build_registry_from_config()
 
         return _registry
 
@@ -398,4 +560,6 @@ def reset_registry() -> None:
     """
     global _registry
     with _registry_lock:
+        if _registry is not None:
+            _registry.shutdown()
         _registry = None
