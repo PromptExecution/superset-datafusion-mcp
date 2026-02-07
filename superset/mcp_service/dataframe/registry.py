@@ -584,6 +584,8 @@ def get_registry() -> VirtualDatasetRegistry:
     Returns:
         The VirtualDatasetRegistry instance
     """
+    from flask import current_app, has_app_context
+
     global _registry
 
     with _registry_lock:
@@ -611,6 +613,8 @@ def reset_registry() -> None:
     When called within a Flask app context, it also clears the app-scoped
     registry stored in current_app.extensions.
     """
+    from flask import current_app, has_app_context
+
     global _registry
     with _registry_lock:
         from flask import current_app, has_app_context
@@ -626,3 +630,6 @@ def reset_registry() -> None:
         if _registry is not None:
             _registry.shutdown()
         _registry = None
+        # Also clear the app-scoped registry if in Flask context
+        if has_app_context():
+            current_app.extensions.pop("mcp_virtual_dataset_registry", None)
