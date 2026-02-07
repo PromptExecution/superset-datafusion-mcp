@@ -128,18 +128,14 @@ class IngestDataFrameResponse(BaseModel):
     dataset: VirtualDatasetInfo | None = Field(
         default=None, description="Virtual dataset info if successful"
     )
+    dataset_id: str | None = Field(
+        default=None,
+        description="Raw dataset UUID",
+    )
     virtual_dataset_id: str | None = Field(
         default=None,
         description=(
-            "Virtual dataset ID for use with generate_chart. "
-            "Use as 'virtual:{dataset_id}' format."
-        ),
-    )
-    dataset_id: str | None = Field(
-        default=None,
-        description=(
-            "Dataset ID for use with generate_chart. "
-            "Use as 'virtual:{dataset_id}' format."
+            "Prefixed dataset ID in 'virtual:{uuid}' format for use with generate_chart"
         ),
     )
     usage_hint: str | None = Field(
