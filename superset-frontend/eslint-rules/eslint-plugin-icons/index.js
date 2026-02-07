@@ -22,29 +22,12 @@
  * @author Apache
  */
 
-import type { Rule } from 'eslint';
-import type { Node } from 'estree';
-
 //------------------------------------------------------------------------------
 // Rule Definition
 //------------------------------------------------------------------------------
 
-interface JSXAttribute {
-  name?: { name: string };
-  value?: { type: string; value?: string; expression?: { value: string } };
-}
-
-interface JSXOpeningElement {
-  name: { name: string };
-  attributes: JSXAttribute[];
-}
-
-interface JSXElementNode {
-  type: string;
-  openingElement: JSXOpeningElement;
-}
-
-const plugin: { rules: Record<string, Rule.RuleModule> } = {
+/** @type {import('eslint').Rule.RuleModule} */
+module.exports = {
   rules: {
     'no-fa-icons-usage': {
       meta: {
@@ -56,27 +39,20 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
         },
         schema: [],
       },
-      create(context: Rule.RuleContext): Rule.RuleListener {
+      create(context) {
         return {
           // Check for JSX elements with class names containing "fa"
-          JSXElement(node: Node): void {
-            const jsxNode = node as unknown as JSXElementNode;
+          JSXElement(node) {
             if (
-              jsxNode.openingElement &&
-              jsxNode.openingElement.name.name === 'i' &&
-              jsxNode.openingElement.attributes &&
-              jsxNode.openingElement.attributes.some((attr: JSXAttribute) => {
-                if (attr.name?.name !== 'className') return false;
-                // Handle className="fa fa-home"
-                if (attr.value?.type === 'Literal') {
-                  return /fa fa-/.test(attr.value.value ?? '');
-                }
-                // Handle className={'fa fa-home'}
-                if (attr.value?.type === 'JSXExpressionContainer') {
-                  return /fa fa-/.test(attr.value.expression?.value ?? '');
-                }
-                return false;
-              })
+              node.openingElement &&
+              node.openingElement.name.name === 'i' &&
+              node.openingElement.attributes &&
+              node.openingElement.attributes.some(
+                attr =>
+                  attr.name &&
+                  attr.name.name === 'className' &&
+                  /fa fa-/.test(attr.value.value),
+              )
             ) {
               context.report({
                 node,
@@ -90,5 +66,3 @@ const plugin: { rules: Record<string, Rule.RuleModule> } = {
     },
   },
 };
-
-module.exports = plugin;

@@ -18,7 +18,7 @@
  */
 
 // https://www.w3.org/wiki/CSS/Properties/color/keywords
-const COLOR_KEYWORDS: string[] = [
+module.exports = [
   'black',
   'silver',
   'gray',
@@ -170,5 +170,3 @@ const COLOR_KEYWORDS: string[] = [
   'whitesmoke',
   'yellowgreen',
 ];
-
-export default COLOR_KEYWORDS;
