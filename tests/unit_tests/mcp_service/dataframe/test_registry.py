@@ -20,11 +20,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pyarrow as pa
 import pytest
+from flask import Flask
 
 from superset.mcp_service.dataframe.registry import (
+    get_registry,
     reset_registry,
     VirtualDataset,
     VirtualDatasetRegistry,
@@ -297,3 +300,99 @@ def test_registry_total_size_and_count(
 
     assert registry.total_count == 2
     assert registry.total_size_bytes > 0
+
+
+def test_get_registry_with_flask_app() -> None:
+    """Test that get_registry() stores registry on Flask app when in app context."""
+    app = Flask(__name__)
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 50
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = 20
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = 90
+
+    with app.app_context():
+        # First call should create and cache the registry
+        registry1 = get_registry()
+        assert registry1 is not None
+        assert registry1.max_size_bytes == 50 * 1024 * 1024
+        assert registry1._max_count == 20
+        assert registry1._default_ttl == timedelta(minutes=90)
+
+        # Verify it's stored in current_app.extensions
+        assert "mcp_virtual_dataset_registry" in app.extensions
+        assert app.extensions["mcp_virtual_dataset_registry"] is registry1
+
+        # Second call should return the same instance
+        registry2 = get_registry()
+        assert registry2 is registry1
+
+
+def test_get_registry_different_apps_get_different_registries() -> None:
+    """Test that different Flask apps get different registry instances."""
+    app1 = Flask("app1")
+    app1.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 100
+
+    app2 = Flask("app2")
+    app2.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = 200
+
+    with app1.app_context():
+        registry1 = get_registry()
+        assert registry1.max_size_bytes == 100 * 1024 * 1024
+
+    with app2.app_context():
+        registry2 = get_registry()
+        assert registry2.max_size_bytes == 200 * 1024 * 1024
+
+    # Ensure they are different instances
+    assert registry1 is not registry2
+
+
+def test_get_registry_config_validation() -> None:
+    """Test that get_registry() validates config values and falls back to defaults."""
+    app = Flask(__name__)
+    
+    # Test with invalid string values
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = "not_a_number"
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = "invalid"
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = "bad_value"
+
+    with app.app_context():
+        registry = get_registry()
+        # Should fall back to defaults
+        assert registry.max_size_bytes == 100 * 1024 * 1024
+        assert registry._max_count == 10
+        assert registry._default_ttl == timedelta(minutes=60)
+
+
+def test_get_registry_config_negative_validation() -> None:
+    """Test that negative config values are rejected and defaults are used."""
+    app = Flask(__name__)
+    
+    app.config["MCP_VIRTUAL_DATASET_MAX_SIZE_MB"] = -10
+    app.config["MCP_VIRTUAL_DATASET_MAX_COUNT"] = 0
+    app.config["MCP_VIRTUAL_DATASET_DEFAULT_TTL_MINUTES"] = -5
+
+    with app.app_context():
+        registry = get_registry()
+        # Should fall back to defaults for invalid values
+        assert registry.max_size_bytes == 100 * 1024 * 1024
+        assert registry._max_count == 10
+        assert registry._default_ttl == timedelta(minutes=60)
+
+
+def test_reset_registry_clears_app_scoped_registry() -> None:
+    """Test that reset_registry() clears both global and app-scoped registries."""
+    app = Flask(__name__)
+    
+    with app.app_context():
+        # Create registry
+        registry1 = get_registry()
+        assert "mcp_virtual_dataset_registry" in app.extensions
+        
+        # Reset should clear it
+        reset_registry()
+        assert "mcp_virtual_dataset_registry" not in app.extensions
+        
+        # Getting registry again should create a new instance
+        registry2 = get_registry()
+        assert registry2 is not registry1
+        assert "mcp_virtual_dataset_registry" in app.extensions

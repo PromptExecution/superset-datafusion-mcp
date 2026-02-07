@@ -146,12 +146,18 @@ async def query_virtual_dataset(
 
         # Execute query with limit
         sql = request.sql.strip()
+
+        # Add LIMIT if not present (safety measure)
+        sql_upper = sql.upper()
+        if "LIMIT" not in sql_upper:
+            sql = f"{sql} LIMIT {request.limit}"
+
         # Remove a trailing semicolon so the query can be safely wrapped
         if sql.endswith(";"):
             sql = sql[:-1].rstrip()
 
         # Always enforce an outer LIMIT to cap the result size
-        sql = f"SELECT * FROM ({sql}) AS subq LIMIT {request.limit}"
+        sql = f"SELECT * FROM ({sql}) AS subq"
 
         await ctx.debug("Executing SQL: %s" % sql[:200])
 
@@ -169,10 +175,9 @@ async def query_virtual_dataset(
 
         # Convert to response format
         df = result_table.to_pandas()
-        rows = df.to_dict("records")
-        for row in rows:
-            for col in row:
-                row[col] = _convert_value(row[col])
+        rows = []
+        for _, row in df.iterrows():
+            rows.append({col: _convert_value(row[col]) for col in df.columns})
 
         columns = [{"name": col, "type": str(df[col].dtype)} for col in df.columns]
 
