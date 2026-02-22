@@ -57,6 +57,49 @@ A modern, enterprise-ready business intelligence web application.
 [**Resources**](#resources) |
 [**Organizations Using Superset**](https://superset.apache.org/inTheWild)
 
+## About This Fork — Maintained by GitHub Copilot
+
+This is a downstream fork of [apache/superset](https://github.com/apache/superset) that extends
+Superset with a **DataFusion MCP (Model Context Protocol) connector**. The fork is kept in sync
+with the upstream `master` branch automatically, and day-to-day maintenance — conflict resolution,
+PR triage, CI diagnosis, and dependency updates — is handled by
+[GitHub Copilot](https://github.com/features/copilot) agentic workflows.
+
+### How it works
+
+```
+apache/superset master
+        │
+        │  daily upstream-sync.yml
+        ▼
+this fork's master
+        │
+        ├─ clean cherry-pick → pushed directly to master
+        └─ conflict → Copilot opens a PR and resolves it
+```
+
+### Automated workflows
+
+| Workflow | Schedule | What Copilot does |
+|----------|----------|-------------------|
+| [upstream-sync.yml](.github/workflows/upstream-sync.yml) | Daily 02:00 UTC | Cherry-picks new commits from `apache/superset`; opens a conflict-resolution PR assigned to `@copilot` on failure |
+| [pr-triage-agent.md](.github/workflows/pr-triage-agent.md) | Daily 09:00 UTC | Categorizes, risk-scores, and labels all open agent-created PRs; recommends `auto_merge`, `fast_track`, `batch_review`, or `defer` |
+| [breaking-change-checker.md](.github/workflows/breaking-change-checker.md) | Weekdays 14:00 UTC | Scans the last 24 hours of commits for breaking changes to the REST API, SQLAlchemy models, TypeScript component props, or DB migrations; opens an issue with an action checklist if found |
+| [ci-doctor.md](.github/workflows/ci-doctor.md) | On CI failure | Investigates failed `Superset Python Unittests` or `Superset Frontend` runs; opens a diagnosed issue with root-cause analysis and fix recommendations |
+| [weekly-workflow-updater.md](.github/workflows/weekly-workflow-updater.md) | Sundays 03:00 UTC | Runs `gh aw update` to SHA-pin GitHub Actions to their latest releases; opens a PR with the diff |
+
+### Copilot agent setup
+
+When Copilot handles a conflict-resolution PR, it uses
+[.github/workflows/copilot-setup-steps.yml](.github/workflows/copilot-setup-steps.yml) to
+provision its environment (Python 3.11, Node 22, and the Superset frontend dependencies).
+
+Agentic workflows (the `.md` files above) are powered by
+[github/gh-aw](https://github.com/github/gh-aw). Each workflow file includes a `source:` SHA pin
+so that `weekly-workflow-updater` can pull upstream improvements automatically.
+
+---
+
 ## Why Superset?
 
 Superset is a modern data exploration and data visualization platform. Superset can replace or augment proprietary business intelligence tools for many teams. Superset integrates well with a variety of data sources.
