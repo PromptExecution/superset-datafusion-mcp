@@ -1,0 +1,203 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Sync Upstream Master
+
+on:
+  schedule:
+    # Run once per day at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (do not push or open PRs)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-upstream:
+    name: Sync upstream apache/superset master
+    runs-on: ubuntu-24.04
+    env:
+      UPSTREAM_REPO: apache/superset
+      UPSTREAM_BRANCH: master
+      TARGET_BRANCH: master
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream "https://github.com/${{ env.UPSTREAM_REPO }}.git"
+          git fetch upstream "${{ env.UPSTREAM_BRANCH }}"
+
+      - name: Collect new upstream commits
+        id: collect
+        run: |
+          # Commits reachable from upstream but not from our HEAD, oldest-first
+          commits=$(git log --oneline --reverse \
+            "HEAD..upstream/${{ env.UPSTREAM_BRANCH }}" \
+            --format="%H")
+
+          if [ -z "$commits" ]; then
+            echo "No new upstream commits. Fork is already in sync."
+            echo "has_commits=false" >> "$GITHUB_OUTPUT"
+          else
+            count=$(echo "$commits" | wc -l | tr -d ' ')
+            echo "Found $count new upstream commit(s)."
+            echo "has_commits=true" >> "$GITHUB_OUTPUT"
+            # Store commit list as newline-separated, encoded for output
+            echo "commits<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$commits" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cherry-pick upstream commits
+        id: cherrypick
+        if: steps.collect.outputs.has_commits == 'true'
+        run: |
+          set +e  # allow failure detection
+
+          failed_sha=""
+          failed_msg=""
+
+          while IFS= read -r sha; do
+            [ -z "$sha" ] && continue
+            echo "::group::Cherry-pick $sha"
+            msg=$(git log --format="%s" -1 "$sha")
+            echo "Applying: $msg"
+
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "(dry-run) would cherry-pick $sha"
+              echo "::endgroup::"
+              continue
+            fi
+
+            git cherry-pick --allow-empty "$sha"
+            exit_code=$?
+
+            if [ $exit_code -ne 0 ]; then
+              echo "Cherry-pick failed for $sha"
+              failed_sha="$sha"
+              failed_msg="$msg"
+              git cherry-pick --abort 2>/dev/null || true
+              echo "::endgroup::"
+              break
+            fi
+
+            echo "Successfully applied $sha"
+            echo "::endgroup::"
+          done <<< "${{ steps.collect.outputs.commits }}"
+
+          if [ -n "$failed_sha" ]; then
+            echo "failed=true"           >> "$GITHUB_OUTPUT"
+            echo "failed_sha=$failed_sha" >> "$GITHUB_OUTPUT"
+            # Escape special characters in message; truncate with ellipsis if needed
+            safe_msg=$(echo "$failed_msg" | tr '\n' ' ')
+            if [ ${#safe_msg} -gt 200 ]; then
+              safe_msg="${safe_msg:0:197}..."
+            fi
+            echo "failed_msg=$safe_msg"  >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push successfully merged commits
+        if: >
+          steps.collect.outputs.has_commits == 'true' &&
+          steps.cherrypick.outputs.failed != 'true' &&
+          inputs.dry_run != 'true'
+        run: |
+          git push origin "${{ env.TARGET_BRANCH }}"
+          echo "All upstream commits merged and pushed successfully."
+
+      - name: Push partial progress before conflict PR
+        if: >
+          steps.cherrypick.outputs.failed == 'true' &&
+          inputs.dry_run != 'true'
+        run: |
+          # Push whatever was successfully cherry-picked before the failure
+          git push origin "${{ env.TARGET_BRANCH }}" || true
+
+      - name: Create conflict-resolution branch and PR
+        if: >
+          steps.cherrypick.outputs.failed == 'true' &&
+          inputs.dry_run != 'true'
+        env:
+          FAILED_SHA: ${{ steps.cherrypick.outputs.failed_sha }}
+          FAILED_MSG: ${{ steps.cherrypick.outputs.failed_msg }}
+        run: |
+          pr_branch="upstream-sync/conflict-${FAILED_SHA:0:8}"
+
+          # Create a branch from current HEAD (partial sync already pushed)
+          git checkout -b "$pr_branch"
+
+          # Apply the failing commit with -Xours so the branch is in a committable
+          # state while the PR body explains what the upstream change contains.
+          # Only call --continue if the initial cherry-pick reports a conflict.
+          if ! git cherry-pick --allow-empty -Xours "$FAILED_SHA"; then
+            git add -A
+            GIT_EDITOR=: git cherry-pick --continue 2>/dev/null || git cherry-pick --abort 2>/dev/null || true
+          fi
+
+          git push origin "$pr_branch"
+
+          short_sha="${FAILED_SHA:0:8}"
+          pr_title="fix(upstream-sync): resolve conflict with upstream commit $short_sha"
+          pr_body="## Upstream sync conflict
+
+          The automated upstream-sync workflow could not cleanly apply the following commit from \`${{ env.UPSTREAM_REPO }}\` \`${{ env.UPSTREAM_BRANCH }}\`:
+
+          | Field | Value |
+          |-------|-------|
+          | **Commit SHA** | [\`$FAILED_SHA\`](https://github.com/${{ env.UPSTREAM_REPO }}/commit/$FAILED_SHA) |
+          | **Message** | $FAILED_MSG |
+
+          ### What needs to be done
+
+          1. Review the conflicting changes in this branch.
+          2. Resolve the conflict so this fork remains in sync with upstream.
+          3. Merge this PR into \`${{ env.TARGET_BRANCH }}\`.
+
+          _Assigned to @copilot for resolution._"
+
+          gh pr create \
+            --title "$pr_title" \
+            --body "$pr_body" \
+            --base "${{ env.TARGET_BRANCH }}" \
+            --head "$pr_branch" \
+            --assignee "copilot" \
+            || gh pr create \
+              --title "$pr_title" \
+              --body "$pr_body" \
+              --base "${{ env.TARGET_BRANCH }}" \
+              --head "$pr_branch"
