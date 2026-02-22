@@ -72,7 +72,7 @@ apache/superset master
         │
         │  daily upstream-sync.yml
         ▼
-PromptExecution/superset master
+this fork's master
         │
         ├─ clean cherry-pick → pushed directly to master
         └─ conflict → Copilot opens a PR and resolves it

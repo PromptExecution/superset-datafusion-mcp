@@ -11,14 +11,14 @@ on:
     # The condition is handled in the workflow body
   stop-after: +1mo
 
-# Only trigger for failures - check in the workflow body
-if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+# Only trigger for failures or cancellations - check in the workflow body
+if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled' }}
 
 permissions:
   actions: read        # To query workflow runs, jobs, and logs
   contents: read       # To read repository files
-  issues: read         # To search and analyze issues
-  pull-requests: read  # To analyze pull request context
+  issues: write        # To search, analyze, and create/update issues
+  pull-requests: write # To analyze pull request context and add comments
 
 network: defaults
 

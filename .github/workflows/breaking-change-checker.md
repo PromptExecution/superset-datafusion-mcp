@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
   actions: read
-  issues: read
+  issues: write
 engine: copilot
 tracker-id: breaking-change-checker
 tools:
