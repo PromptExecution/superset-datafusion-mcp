@@ -148,6 +148,10 @@ jobs:
           # Push whatever was successfully cherry-picked before the failure
           git push origin "${{ env.TARGET_BRANCH }}" || true
 
+      # TODO(#23 task 5): Replace the hand-rolled PR creation below with gh-aw safe-outputs
+      # once the gh-aw `compile` step is set up in this repo. The safe-outputs pattern
+      # (see .github/workflows/pr-triage-agent.md and ci-doctor.md for reference) provides
+      # structured output handling, expiry, and Copilot agent assignment in a single block.
       - name: Create conflict-resolution branch and PR
         if: >
           steps.cherrypick.outputs.failed == 'true' &&
