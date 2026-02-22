@@ -57,7 +57,7 @@ def _to_sql_literal(value: Any) -> str:
         return "NULL"
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         return str(value)
     escaped = str(value).replace("'", "''")
     return f"'{escaped}'"
