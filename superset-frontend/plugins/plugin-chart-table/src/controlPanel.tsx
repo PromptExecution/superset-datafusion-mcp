@@ -40,6 +40,8 @@ import {
   isRegularMetric,
   isPercentMetric,
   ConditionalFormattingConfig,
+  ObjectFormattingEnum,
+  ColorSchemeEnum,
 } from '@superset-ui/chart-controls';
 import { t } from '@apache-superset/core';
 import {
@@ -57,7 +59,6 @@ import {
 import { GenericDataType } from '@apache-superset/core/api/core';
 import { isEmpty, last } from 'lodash';
 import { PAGE_SIZE_OPTIONS, SERVER_PAGE_SIZE_OPTIONS } from './consts';
-import { ColorSchemeEnum } from './types';
 
 function getQueryMode(controls: ControlStateMapping): QueryMode {
   const mode = controls?.query_mode?.value;
@@ -273,7 +274,7 @@ const config: ControlPanelConfig = {
               visibility: ({ controls }) => {
                 const dttmLookup = Object.fromEntries(
                   ensureIsArray(controls?.groupby?.options).map(option => [
-                    option.column_name,
+                    (option.column_name || '').toLowerCase(),
                     option.is_dttm,
                   ]),
                 );
@@ -284,7 +285,7 @@ const config: ControlPanelConfig = {
                       return true;
                     }
                     if (isPhysicalColumn(selection)) {
-                      return !!dttmLookup[selection];
+                      return !!dttmLookup[(selection || '').toLowerCase()];
                     }
                     return false;
                   })
@@ -781,12 +782,16 @@ const config: ControlPanelConfig = {
                         item.colorScheme &&
                         !['Green', 'Red'].includes(item.colorScheme)
                       ) {
-                        if (!item.toAllRow || !item.toTextColor) {
+                        if (item.columnFormatting === undefined) {
                           // eslint-disable-next-line no-param-reassign
                           array[index] = {
                             ...item,
-                            toAllRow: item.toAllRow ?? false,
-                            toTextColor: item.toTextColor ?? false,
+                            ...(item.toTextColor === true && {
+                              objectFormatting: ObjectFormattingEnum.TEXT_COLOR,
+                            }),
+                            ...(item.toAllRow === true && {
+                              columnFormatting: ObjectFormattingEnum.ENTIRE_ROW,
+                            }),
                           };
                         }
                       }
@@ -795,6 +800,23 @@ const config: ControlPanelConfig = {
                 }
                 const { colnames, coltypes } =
                   chart?.queriesResponse?.[0] ?? {};
+                const allColumns =
+                  Array.isArray(colnames) && Array.isArray(coltypes)
+                    ? [
+                        {
+                          value: ObjectFormattingEnum.ENTIRE_ROW,
+                          label: t('entire row'),
+                          dataType: GenericDataType.String,
+                        },
+                        ...colnames.map((colname: string, index: number) => ({
+                          value: colname,
+                          label: Array.isArray(verboseMap)
+                            ? colname
+                            : (verboseMap[colname] ?? colname),
+                          dataType: coltypes[index],
+                        })),
+                      ]
+                    : [];
                 const numericColumns =
                   Array.isArray(colnames) && Array.isArray(coltypes)
                     ? colnames.reduce((acc, colname, index) => {
@@ -826,10 +848,7 @@ const config: ControlPanelConfig = {
                   removeIrrelevantConditions: chartStatus === 'success',
                   columnOptions,
                   verboseMap,
-                  conditionalFormattingFlag: {
-                    toAllRowCheck: true,
-                    toColorTextCheck: true,
-                  },
+                  allColumns,
                   extraColorChoices,
                 };
               },

@@ -189,6 +189,8 @@ const toAceKeyword = (keyword: EditorKeyword): AceCompleterKeyword => ({
   value: keyword.value ?? keyword.name,
   score: keyword.score ?? 0,
   meta: keyword.meta ?? '',
+  docText: keyword.detail,
+  docHTML: keyword.documentation,
 });
 
 /**
@@ -251,18 +253,6 @@ const AceEditorProvider = forwardRef<EditorHandle, EditorProps>(
     // Track if event listeners have been registered to prevent duplicates
     const listenersRegisteredRef = useRef(false);
 
-    // Notify when ready (only once)
-    useEffect(() => {
-      if (
-        onReady &&
-        aceEditorRef.current?.editor &&
-        !onReadyCalledRef.current
-      ) {
-        onReadyCalledRef.current = true;
-        onReady(handle);
-      }
-    }, [onReady, handle]);
-
     // Handle editor load
     const onEditorLoad = useCallback(
       (editor: AceEditor['editor']) => {
@@ -306,10 +296,16 @@ const AceEditorProvider = forwardRef<EditorHandle, EditorProps>(
           });
         }
 
+        // Notify when ready (only once) - must be done here after editor is loaded
+        if (onReady && !onReadyCalledRef.current) {
+          onReadyCalledRef.current = true;
+          onReady(handle);
+        }
+
         // Focus the editor
         editor.focus();
       },
-      [hotkeys, handle],
+      [hotkeys, handle, onReady],
     );
 
     // Handle blur

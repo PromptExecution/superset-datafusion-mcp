@@ -41,6 +41,7 @@ import {
   ColorFormatters,
   ConditionalFormattingConfig,
   getColorFormatters,
+  ColorSchemeEnum,
 } from '@superset-ui/chart-controls';
 
 import { isEmpty, merge } from 'lodash';
@@ -48,7 +49,6 @@ import isEqualColumns from './utils/isEqualColumns';
 import DateWithFormatter from './utils/DateWithFormatter';
 import {
   BasicColorFormatterType,
-  ColorSchemeEnum,
   DataColumnMeta,
   TableChartProps,
   TableChartTransformedProps,
@@ -212,6 +212,7 @@ const processColumns = memoizeOne(function processColumns(
       metrics: metrics_,
       percent_metrics: percentMetrics_,
       column_config: columnConfig = {},
+      query_mode: queryMode,
     },
     rawDatasource,
     queriesData,
@@ -274,7 +275,7 @@ const processColumns = memoizeOne(function processColumns(
         const timeFormat = customFormat || tableTimestampFormat;
         // When format is "Adaptive Formatting" (smart_date)
         if (timeFormat === SMART_DATE_ID) {
-          if (granularity) {
+          if (granularity && queryMode !== QueryMode.Raw) {
             // time column use formats based on granularity
             formatter = getTimeFormatterForGranularity(granularity);
           } else if (customFormat) {
@@ -568,6 +569,29 @@ const transformProps = (
     return { arrow, arrowColor, backgroundColor };
   };
 
+  const nonCustomNorInheritShifts = ensureIsArray(formData.time_compare).filter(
+    (shift: string) => shift !== 'custom' && shift !== 'inherit',
+  );
+  const customOrInheritShifts = ensureIsArray(formData.time_compare).filter(
+    (shift: string) => shift === 'custom' || shift === 'inherit',
+  );
+
+  let timeOffsets: string[] = [];
+
+  if (isUsingTimeComparison && !isEmpty(nonCustomNorInheritShifts)) {
+    timeOffsets = nonCustomNorInheritShifts;
+  }
+
+  // Shifts for custom or inherit time comparison
+  if (isUsingTimeComparison && !isEmpty(customOrInheritShifts)) {
+    if (customOrInheritShifts.includes('custom')) {
+      timeOffsets = timeOffsets.concat([formData.start_date_offset]);
+    }
+    if (customOrInheritShifts.includes('inherit')) {
+      timeOffsets = timeOffsets.concat(['inherit']);
+    }
+  }
+
   const getBasicColorFormatter = memoizeOne(function getBasicColorFormatter(
     originalData: DataRecord[] | undefined,
     originalColumns: DataColumnMeta[],
@@ -652,28 +676,6 @@ const transformProps = (
 
   const timeGrain = extractTimegrain(formData);
 
-  const nonCustomNorInheritShifts = ensureIsArray(formData.time_compare).filter(
-    (shift: string) => shift !== 'custom' && shift !== 'inherit',
-  );
-  const customOrInheritShifts = ensureIsArray(formData.time_compare).filter(
-    (shift: string) => shift === 'custom' || shift === 'inherit',
-  );
-
-  let timeOffsets: string[] = [];
-
-  if (isUsingTimeComparison && !isEmpty(nonCustomNorInheritShifts)) {
-    timeOffsets = nonCustomNorInheritShifts;
-  }
-
-  // Shifts for custom or inherit time comparison
-  if (isUsingTimeComparison && !isEmpty(customOrInheritShifts)) {
-    if (customOrInheritShifts.includes('custom')) {
-      timeOffsets = timeOffsets.concat([formData.start_date_offset]);
-    }
-    if (customOrInheritShifts.includes('inherit')) {
-      timeOffsets = timeOffsets.concat(['inherit']);
-    }
-  }
   const comparisonSuffix = isUsingTimeComparison
     ? ensureIsArray(timeOffsets)[0]
     : '';
