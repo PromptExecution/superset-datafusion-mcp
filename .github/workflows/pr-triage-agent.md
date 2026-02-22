@@ -5,9 +5,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
-  # Note: issues and discussions write handled via safe-outputs
+  issues: write
+  pull-requests: write
 engine: copilot
 tools:
   github:
@@ -61,12 +60,17 @@ Process all open agent-created PRs in the backlog to:
 **1.1 Query Open Agent PRs**
 
 Use GitHub tools to fetch all open pull requests:
-- Filter by: `is:open is:pr author:app/github-copilot`
-- **Fork PRs only**: After fetching, filter to include only PRs where `head.repo.full_name`
-  differs from `base.repo.full_name` (i.e., PRs opened from forks, not from branches within the
-  same repository). Skip any PRs that originate from the same repository.
-  > This filter is intentionally inclusive of upstream-sync conflict PRs, which are opened from
-  > fork branches by the upstream-sync workflow.
+- Filter by: `is:open is:pr`
+- **Include agent-created PRs**: PRs authored by `app/github-copilot`.
+- **Include upstream-sync conflict PRs**: PRs authored by `github-actions[bot]` whose head branch
+  name starts with `upstream-sync/conflict-`.
+- **Fork PRs only (with upstream-sync exception)**: After fetching, filter to include only PRs
+  where `head.repo.full_name` differs from `base.repo.full_name` (i.e., PRs opened from forks),
+  **or** PRs whose `head.ref` starts with `upstream-sync/conflict-`. Skip other PRs that
+  originate from the same repository.
+  > This logic explicitly includes upstream-sync conflict PRs by matching their branch prefix
+  > (`upstream-sync/conflict-`) and `github-actions[bot]` author, even though they come from
+  > same-repository branches.
 - Get PR details including:
   - Number, title, description, author
   - Files changed (count and paths)

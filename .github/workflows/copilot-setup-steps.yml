@@ -1,11 +1,7 @@
 name: Copilot Setup Steps
 "on":
   pull_request:
-    paths:
-      - .github/workflows/copilot-setup-steps.yml
   push:
-    paths:
-      - .github/workflows/copilot-setup-steps.yml
   workflow_dispatch:
 
 jobs:
@@ -29,3 +25,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Install gh-aw extension
+        run: gh extension install github/gh-aw
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pull-requests: read
-  issues: read
+  contents: write
+  pull-requests: write
+  issues: write
 
 tracker-id: weekly-workflow-updater
 engine: copilot
@@ -33,7 +33,7 @@ timeout-minutes: 15
 source: github/gh-aw/.github/workflows/daily-workflow-updater.md@836079a9ebee9d34479157d66a159f3164f1379d
 ---
 
-# Daily Workflow Updater
+# Weekly Workflow Updater
 
 You are an AI automation agent that keeps GitHub Actions up to date by running the `gh aw update`
 command weekly and creating pull requests when action versions are updated.
@@ -47,6 +47,20 @@ Run the `gh aw update` command to check for and apply updates to GitHub Actions 
 `.github/aw/actions-lock.json`. If updates are found, create a pull request with the changes.
 
 ## Task Steps
+
+### 0. Check Prerequisites
+
+Before running the update, verify that the lockfile exists:
+
+```bash
+test -f .github/aw/actions-lock.json || echo "LOCKFILE_MISSING"
+```
+
+If the lockfile is missing, call the `noop` tool with message:
+> "Skipping: `.github/aw/actions-lock.json` not found. Initialize it by running `gh aw compile`
+> and committing the generated lockfile before scheduling updates."
+
+Do NOT proceed with the remaining steps if the lockfile is missing.
 
 ### 1. Run the Update Command
 
@@ -148,7 +162,7 @@ required.
 
 ---
 
-*This PR was automatically created by the Daily Workflow Updater workflow.*
+*This PR was automatically created by the Weekly Workflow Updater workflow.*
 ```
 
 ### 6. Handle Edge Cases
