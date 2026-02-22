@@ -98,7 +98,7 @@ def _flatten_prometheus_result(
             metric = series.get("metric", {})
             metric_labels = {str(k): str(v) for k, v in metric.items()}
             for point in series.get("values", []):
-                if not isinstance(point, list | tuple) or len(point) != 2:
+                if not isinstance(point, (list, tuple)) or len(point) != 2:
                     continue
                 rows.append(
                     {
@@ -118,7 +118,7 @@ def _flatten_prometheus_result(
             metric = series.get("metric", {})
             metric_labels = {str(k): str(v) for k, v in metric.items()}
             point = series.get("value", [])
-            if isinstance(point, list | tuple) and len(point) == 2:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
                 rows.append(
                     {
                         **metric_labels,
@@ -129,7 +129,7 @@ def _flatten_prometheus_result(
         return rows
 
     if result_type in {"scalar", "string"}:
-        if isinstance(result, list | tuple) and len(result) == 2:
+        if isinstance(result, (list, tuple)) and len(result) == 2:
             rows.append(
                 {
                     "timestamp": _format_timestamp(result[0]),
